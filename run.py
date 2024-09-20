@@ -16,6 +16,10 @@ export OPENAI_API_KEY="[your_openai_api_key]"
 ```
 """
 
+__author__ = "hw56@indiana.edu"
+__version__ = "0.0.1"
+__license__ = "0BSD"
+
 import os
 import pandas as pd
 from openai import OpenAI
