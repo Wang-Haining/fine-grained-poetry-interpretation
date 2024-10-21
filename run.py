@@ -92,7 +92,6 @@ def get_interpretation_from_openai(source,
         poem_key = 'text'
     elif source == 'poetry_foundation':
         df = pd.read_csv("data/PoetryFoundationData.csv")
-        # relevant columns: Title, Author, text (yes, lower case)
         title_key = 'Title'
         author_key = 'Poet'
         poem_key = 'Poem'
@@ -144,6 +143,6 @@ if __name__ == '__main__':
     client = OpenAI(
         api_key=os.environ.get(OPENAI_API_PROJECT_KEY_, "Set up OPENAI API Key"))
 
-    get_interpretation_from_openai(source='poets_org', num_examples=50)
+    get_interpretation_from_openai(source='poets_org', num_examples=100)
 
-    get_interpretation_from_openai(source='public_domain_poetry', num_examples=50)
+    get_interpretation_from_openai(source='public_domain_poetry', num_examples=100)
