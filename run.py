@@ -79,19 +79,19 @@ def get_interpretation_from_openai(source,
                                    prompt_template=PROMPT_TEMPLATE,
                                    verbose=True):
 
-    if source == 'poets_org':
+    if source == 'poets_org':  # 12,666 examples
         df = pd.read_parquet('data/poets_org.parquet')
         # relevant columns: author, title, poem_text
         title_key = 'title'
         author_key = 'author'
         poem_key = 'poem_text'
-    elif source == 'public_domain_poetry':
+    elif source == 'public_domain_poetry': # 38,499 examples
         df = pd.read_json("hf://datasets/DanFosing/public-domain-poetry/poems.json")
         # relevant columns: Title, Author, text (yes, lower case)
         title_key = 'Title'
         author_key = 'Author'
         poem_key = 'text'
-    elif source == 'poetry_foundation':
+    elif source == 'poetry_foundation':  # 13,854 examples
         df = pd.read_csv("data/PoetryFoundationData.csv")
         title_key = 'Title'
         author_key = 'Poet'
@@ -105,7 +105,7 @@ def get_interpretation_from_openai(source,
         _num_examples = len(df)
     else:
         _num_examples = int(num_examples)
-    print(f'{source} corpus: {num_examples} examples to process...')
+    print(f'{source} corpus: {_num_examples} examples to process...')
 
     generated_data = []
 
