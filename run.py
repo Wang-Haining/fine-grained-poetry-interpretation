@@ -29,10 +29,11 @@ OPENAI_API_PROJECT_KEY_ = 'OPENAI_API_KEY_POETRY'
 # MODELS = ["gpt-4o-2024-05-13", "gpt-3.5-turbo-0125"]
 MODEL = "gpt-4o-2024-05-13"
 NUM_EXAMPLES = 50
+
 SYSTEM_PROMPT = "You are an assistant that strictly follows user instructions. Provide only the analysis and content requested by the user without any greetings, closing remarks, or unnecessary additions. Do not include any extra text beyond what is required."
 
 PROMPT_TEMPLATE = """
-Analyze the poem "{title}" by {author}. Please provide a structured interpretation following these steps:
+Analyze the poem "{title}" by {author}. Please provide a structured, markdown-formatted interpretation following these steps:
 
 1. Summary: Give a brief overview of the poem's main themes and ideas. Summarize the key emotions or messages conveyed by the poet.
 
@@ -41,15 +42,16 @@ For each stanza:
 - Summarize the content.
 - Discuss any literary devices used (such as metaphor, simile, personification, etc.).
 - Explain how the stanza contributes to the overall theme of the poem.
+- If the poem does not have a traditional stanza structure, adapt the analysis accordingly.
 
 3. Structure and Form:
-Discuss the poem's structure (e.g., number of stanzas, rhyme scheme, meter) and how the form contributes to the poem's meaning or emotional effect.
+Discuss the poem's structure (e.g., number of stanzas, rhyme scheme, meter) and how the form contributes to the poem's meaning or emotional effect. Mention any significant literary devices like repetition, enjambment, or caesura if relevant.
 
-4. Imagery and Symbolism:
-Analyze the imagery, symbols, and figurative language. Explain how these elements enhance the meaning of the poem.
+4. Imagery, Symbolism, and Figurative Language:
+Analyze the imagery, symbols, and figurative language (metaphors, similes, personification, etc.). Explain how these elements enhance the meaning of the poem.
 
 5. Tone and Mood:
-Describe the tone (the poet’s attitude) and the mood (the emotion created for the reader) throughout the poem.
+Describe the tone (the poet’s attitude towards the subject) and the mood (the emotion created for the reader) throughout the poem.
 
 Provide your response in a clear and detailed manner, as if explaining the poem to someone unfamiliar with it.
 
@@ -88,8 +90,15 @@ def get_interpretation_from_openai(source,
         title_key = 'Title'
         author_key = 'Author'
         poem_key = 'text'
+    elif source == 'poetry_foundation':
+        df = pd.read_csv("data/PoetryFoundationData.csv")
+        # relevant columns: Title, Author, text (yes, lower case)
+        title_key = 'Title'
+        author_key = 'Poet'
+        poem_key = 'Poem'
     else:
-        raise ValueError('Source must be either "poets_org" or "public_domain_poetry"')
+        raise ValueError('Source must be "poets_org", "public_domain_poetry", or '
+                         '"poetry_foundation"')
     generated_data = []
 
     for i, (_, item) in enumerate(df.head(num_examples).iterrows()):
