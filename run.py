@@ -1,29 +1,8 @@
-"""
-This script generates structured interpretations of poems by leveraging the OpenAI API.
-It supports two data sources:
-- 'poets_org' - a dataset containing poems from poets.org in Parquet format.
-- 'public_domain_poetry' - a dataset containing public domain poems in JSON format.
-
-The script fetches a set number of poems, formats them into prompts, and sends the
-prompts to OpenAI's GPT model for analysis. The structured interpretation for each poem
-is saved along with the poem's original details (author, title, poem text) in Parquet
-format.
-
-Make sure OpenAI API key has been set up to work properly.
-```bash
-# for example, add the below line to ~/.bashrc
-export OPENAI_API_KEY="[your_openai_api_key]"
-```
-"""
-
-__author__ = "hw56@indiana.edu"
-__version__ = "0.0.1"
-__license__ = "0BSD"
-
 import os
 import pandas as pd
 from openai import OpenAI
 import argparse
+from tqdm import tqdm
 
 
 OPENAI_API_PROJECT_KEY_ = 'OPENAI_API_KEY_POETRY'
@@ -57,20 +36,31 @@ Provide your response in a clear and detailed manner, as if explaining the poem 
 This is the poem: {poem}.
 """
 
+def save_interpretations_incrementally(df, source, num_examples):
+    """Saves the batch of interpretations incrementally to a Parquet file."""
+    file_name = f"{source}_first_{num_examples}.parquet" if num_examples != 'all' else f"{source}.parquet"
+    file_path = os.path.join('interpretation', file_name)
 
-def save_interpretations_to_parquet(df, source, num_examples):
-    """Saves the entire batch of interpretations as a Parquet file."""
     if not os.path.exists('interpretation'):
         os.makedirs('interpretation')
-    if num_examples == 'all':
-        file_name = f"{source}.parquet"
-    else:
-        file_name = f"{source}_first_{int(num_examples)}.parquet"
-    file_path = os.path.join('interpretation', file_name)
+
+    # if file exists, append to it
+    if os.path.exists(file_path):
+        existing_df = pd.read_parquet(file_path)
+        df = pd.concat([existing_df, df], ignore_index=True)
 
     df.to_parquet(file_path, index=False)
     print(f"Saved to {file_path}")
 
+def get_last_processed_index(source, num_examples):
+    """Returns the index of the last processed poem, if any."""
+    file_name = f"{source}_first_{num_examples}.parquet" if num_examples != 'all' else f"{source}.parquet"
+    file_path = os.path.join('interpretation', file_name)
+
+    if os.path.exists(file_path):
+        existing_df = pd.read_parquet(file_path)
+        return len(existing_df)
+    return 0
 
 def get_interpretation_from_openai(source,
                                    num_examples,
@@ -81,13 +71,11 @@ def get_interpretation_from_openai(source,
 
     if source == 'poets_org':  # 12,666 examples
         df = pd.read_parquet('data/poets_org.parquet')
-        # relevant columns: author, title, poem_text
         title_key = 'title'
         author_key = 'author'
         poem_key = 'poem_text'
-    elif source == 'public_domain_poetry': # 38,499 examples
+    elif source == 'public_domain_poetry':  # 38,499 examples
         df = pd.read_json("hf://datasets/DanFosing/public-domain-poetry/poems.json")
-        # relevant columns: Title, Author, text (yes, lower case)
         title_key = 'Title'
         author_key = 'Author'
         poem_key = 'text'
@@ -97,19 +85,19 @@ def get_interpretation_from_openai(source,
         author_key = 'Poet'
         poem_key = 'Poem'
     else:
-        raise ValueError('Source must be "poets_org", "public_domain_poetry", or '
-                         '"poetry_foundation"')
+        raise ValueError('Source must be "poets_org", "public_domain_poetry", or "poetry_foundation"')
 
-    _num_examples = 0
-    if num_examples == "all":
-        _num_examples = len(df)
-    else:
-        _num_examples = int(num_examples)
-    print(f'{source} corpus: {_num_examples} examples to process...')
+    # determine the number of examples to process
+    _num_examples = len(df) if num_examples == "all" else int(num_examples)
+    last_processed_index = get_last_processed_index(source, num_examples)
+
+    print(f"{source} corpus: {_num_examples} examples to process...")
+    print(f"Resuming from index {last_processed_index}...")
 
     generated_data = []
 
-    for i, (_, item) in enumerate(df.head(_num_examples).iterrows()):
+    # skip poems already processed, adding tqdm progress bar here
+    for i, (_, item) in tqdm(enumerate(df.iloc[last_processed_index:_num_examples].iterrows(), start=last_processed_index), total=_num_examples - last_processed_index):
         title = item[title_key]
         author = item[author_key]
         poem = item[poem_key]
@@ -119,8 +107,7 @@ def get_interpretation_from_openai(source,
         response = client.chat.completions.create(
             model=model,
             messages=[
-                {"role": "system",
-                 "content": system_prompt},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt},
             ],
             temperature=0.7,
@@ -142,12 +129,19 @@ def get_interpretation_from_openai(source,
             print(f"Generated interpretation for {title} by {author}: {generated_text}")
             print("*" * 90)
 
-    interpretations_df = pd.DataFrame(generated_data)
-    save_interpretations_to_parquet(interpretations_df, source, num_examples)
+        # save after each iteration (or batch of poems for efficiency)
+        if i % 10 == 0 or i == _num_examples - 1:  # save every 10 generations or at the end
+            interpretations_df = pd.DataFrame(generated_data)
+            save_interpretations_incrementally(interpretations_df, source, num_examples)
+            generated_data = []  # reset the buffer to avoid duplication
+
+    # save any remaining data after the loop
+    if generated_data:
+        interpretations_df = pd.DataFrame(generated_data)
+        save_interpretations_incrementally(interpretations_df, source, num_examples)
 
 
 if __name__ == '__main__':
-
     parser = argparse.ArgumentParser(description="Generate poem interpretations using OpenAI GPT models.")
     parser.add_argument('--source', type=str, required=True, choices=['poets_org', 'public_domain_poetry', 'poetry_foundation'],
                         help="Choose the corpus to generate interpretations from: 'poets_org', 'public_domain_poetry', or 'poetry_foundation'.")
