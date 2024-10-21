@@ -23,12 +23,11 @@ __license__ = "0BSD"
 import os
 import pandas as pd
 from openai import OpenAI
+import argparse
 
 
 OPENAI_API_PROJECT_KEY_ = 'OPENAI_API_KEY_POETRY'
-# MODELS = ["gpt-4o-2024-05-13", "gpt-3.5-turbo-0125"]
 MODEL = "gpt-4o-2024-05-13"
-NUM_EXAMPLES = 50
 
 SYSTEM_PROMPT = "You are an assistant that strictly follows user instructions. Provide only the analysis and content requested by the user without any greetings, closing remarks, or unnecessary additions. Do not include any extra text beyond what is required."
 
@@ -63,8 +62,10 @@ def save_interpretations_to_parquet(df, source, num_examples):
     """Saves the entire batch of interpretations as a Parquet file."""
     if not os.path.exists('interpretation'):
         os.makedirs('interpretation')
-
-    file_name = f"{source}_first_{num_examples}.parquet"
+    if num_examples == 'all':
+        file_name = f"{source}.parquet"
+    else:
+        file_name = f"{source}_first_{int(num_examples)}.parquet"
     file_path = os.path.join('interpretation', file_name)
 
     df.to_parquet(file_path, index=False)
@@ -72,7 +73,7 @@ def save_interpretations_to_parquet(df, source, num_examples):
 
 
 def get_interpretation_from_openai(source,
-                                   num_examples=NUM_EXAMPLES,
+                                   num_examples,
                                    model=MODEL,
                                    system_prompt=SYSTEM_PROMPT,
                                    prompt_template=PROMPT_TEMPLATE,
@@ -98,9 +99,17 @@ def get_interpretation_from_openai(source,
     else:
         raise ValueError('Source must be "poets_org", "public_domain_poetry", or '
                          '"poetry_foundation"')
+
+    _num_examples = 0
+    if num_examples == "all":
+        _num_examples = len(df)
+    else:
+        _num_examples = int(num_examples)
+    print(f'{source} corpus: {num_examples} examples to process...')
+
     generated_data = []
 
-    for i, (_, item) in enumerate(df.head(num_examples).iterrows()):
+    for i, (_, item) in enumerate(df.head(_num_examples).iterrows()):
         title = item[title_key]
         author = item[author_key]
         poem = item[poem_key]
@@ -137,12 +146,20 @@ def get_interpretation_from_openai(source,
     save_interpretations_to_parquet(interpretations_df, source, num_examples)
 
 
-
 if __name__ == '__main__':
+
+    parser = argparse.ArgumentParser(description="Generate poem interpretations using OpenAI GPT models.")
+    parser.add_argument('--source', type=str, required=True, choices=['poets_org', 'public_domain_poetry', 'poetry_foundation'],
+                        help="Choose the corpus to generate interpretations from: 'poets_org', 'public_domain_poetry', or 'poetry_foundation'.")
+    parser.add_argument('--num_examples', type=str, required=True,
+                        help="Number of examples to generate. Pass 'all' to generate for all available samples.")
+    parser.add_argument('--verbose', action='store_true',
+                        help='Print generated interpretations along the way.')
+    args = parser.parse_args()
 
     client = OpenAI(
         api_key=os.environ.get(OPENAI_API_PROJECT_KEY_, "Set up OPENAI API Key"))
 
-    get_interpretation_from_openai(source='poets_org', num_examples=100)
-
-    get_interpretation_from_openai(source='public_domain_poetry', num_examples=100)
+    get_interpretation_from_openai(source=args.source,
+                                   num_examples=args.num_examples,
+                                   verbose=args.verbose)
