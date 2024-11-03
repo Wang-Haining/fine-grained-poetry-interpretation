@@ -1,13 +1,14 @@
 from datasets import load_from_disk, concatenate_datasets, Dataset, DatasetDict
 from sklearn.model_selection import train_test_split
+import pandas as pd
 from nltk.tokenize import casual_tokenize
 import numpy as np
 
 POETRY_INTERPRETATION_CORPUS = 'interpretation/poetry_interpretation_corpus_v001.hf'
 
 # load datasets
-pf_ds = load_from_disk('interpretation/poetry_foundation.parquet')
-pdp_ds = load_from_disk('public_domain_poetry.parquet')
+pf_ds = pd.read_parquet('interpretation/poetry_foundation.parquet')
+pdp_ds = pd.read_parquet('public_domain_poetry.parquet')
 
 # add source identifier (for stats)
 pf_ds = pf_ds.map(lambda x: {**x, 'source': 'poetry_foundation'})
