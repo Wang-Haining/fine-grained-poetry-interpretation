@@ -54,8 +54,8 @@ poem_lengths = dataset.apply(lambda x: len(casual_tokenize(x['poem'])), axis=1)
 interpretation_lengths = dataset.apply(lambda x: len(casual_tokenize(x['interpretation'])), axis=1)
 
 # calculate percentiles
-poem_percentiles = np.percentile(poem_lengths, [25, 50, 75])
-interpretation_percentiles = np.percentile(interpretation_lengths, [25, 50, 75])
+poem_percentiles = np.percentile(poem_lengths, [25, 50, 75, 100])
+interpretation_percentiles = np.percentile(interpretation_lengths, [25, 50, 75, 100])
 
 corpus_stats['percentile_length_distribution']['poem'] = poem_percentiles.tolist()
 corpus_stats['percentile_length_distribution']['interpretation'] = interpretation_percentiles.tolist()
