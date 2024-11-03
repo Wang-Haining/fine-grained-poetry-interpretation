@@ -8,7 +8,7 @@ POETRY_INTERPRETATION_CORPUS = 'interpretation/poetry_interpretation_corpus_v001
 
 # load datasets
 pf_ds = pd.read_parquet('interpretation/poetry_foundation.parquet')
-pdp_ds = pd.read_parquet('public_domain_poetry.parquet')
+pdp_ds = pd.read_parquet('interpretation/public_domain_poetry.parquet')
 
 # add source identifier (for stats)
 pf_ds = pf_ds.map(lambda x: {**x, 'source': 'poetry_foundation'})
