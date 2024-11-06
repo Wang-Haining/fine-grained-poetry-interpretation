@@ -27,10 +27,9 @@ from transformers import (AutoModelForCausalLM, AutoTokenizer,
                           EarlyStoppingCallback, TrainingArguments)
 from trl import SFTTrainer, set_seed
 
-from utils import (CKPTS_DIR, DATASET_PATH, MAX_INPUT_LENGTHS, MAX_OUTPUT_LENGTHS,
-                   PROJECT_NAME, RESPONSE_TEMP, TASK_PREFIX)
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
+PROJECT_NAME = 'Poem_Interpretation'
 CKPTS_DIR = 'ckpts'
 # todo: you have to have a pre-fixed split
 POEM_INTERPRETATION_CORPUS = 'interpretation/poem_interpretation_corpus_v001.hf'
