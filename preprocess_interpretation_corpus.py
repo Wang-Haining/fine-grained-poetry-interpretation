@@ -40,7 +40,7 @@ dataset_dict = DatasetDict({
 })
 
 # save
-dataset_dict.save_to_disk(POETRY_INTERPRETATION_CORPUS)
+dataset_dict.save_to_disk(POEM_INTERPRETATION_CORPUS)
 
 # corpus statistics
 corpus_stats = {
