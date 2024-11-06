@@ -33,9 +33,14 @@ from utils import (CKPTS_DIR, DATASET_PATH, MAX_INPUT_LENGTHS, MAX_OUTPUT_LENGTH
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 CKPTS_DIR = 'ckpts'
 # todo: you have to have a pre-fixed split
-POETRY_FOUDATION_INTERPRETATION_CORPUS = 'interpretation/poetry_foundation.parquet'
-PUBLIC_DOMAIN_POETRY_INTERPRETATION_CORPUS = 'public_domain_poetry.parquet'
+POEM_INTERPRETATION_CORPUS = 'interpretation/poem_interpretation_corpus_v001.hf'
 ALL_POETRY_CORPUS = ''
+
+PROMPT_TEMPLATE = """
+Interpret "{title}" by {author}. This is the poem: {poem}
+
+Interpretation: {interpretation}
+"""
 
 
 def formatting_func(example: DatasetDict) -> List[str]:
@@ -50,11 +55,11 @@ def formatting_func(example: DatasetDict) -> List[str]:
         A list of formatted strings ready for model training.
     """
     output_texts = []
-    for i in range(len(example["source"])):
-        text = (
-            TASK_PREFIX
-            + f"{example['source'][i]}{RESPONSE_TEMP} {example['target'][i]}"
-        )
+    for i in range(len(example["poem"])):
+        text = PROMPT_TEMPLATE.format(title=example["title"][i],
+                                      author=example["author"][i],
+                                      poem=example["poem"][i],
+                                      interpretation=example["interpretation"][i])
         output_texts.append(text)
 
     return output_texts
@@ -86,6 +91,8 @@ if __name__ == "__main__":
     training_args = TrainingArguments(
         output_dir=f"{CKPTS_DIR}/{run_name}",
         overwrite_output_dir=True,
+        packing=True,
+        eval_packing=False,
         num_train_epochs=50.0,
         do_train=True,
         do_eval=True,
@@ -114,15 +121,12 @@ if __name__ == "__main__":
     tokenizer = AutoTokenizer.from_pretrained(args.model, padding_side="right")
     # init dataset
     datasets = []
-    if 'poetry_foundation' in args.corpus:
-        pf_ds = load_from_disk(POETRY_FOUDATION_INTERPRETATION_CORPUS)
-        datasets.append(pf_ds)
-    if 'public_domain_poetry' in args.corpus:
-        pdp_ds = load_from_disk(PUBLIC_DOMAIN_POETRY_INTERPRETATION_CORPUS)
-        datasets.append(pdp_ds)
+    if 'poem_interpretation' in args.corpus:
+        ds = load_from_disk(POEM_INTERPRETATION_CORPUS)
+        datasets.append(ds)
     if 'all_poetry' in args.corpus:
-        ap_ds = load_from_disk(ALL_POETRY_CORPUS)
-        datasets.append(ap_ds)
+        ds = load_from_disk(ALL_POETRY_CORPUS)
+        datasets.append(ds)
     # combine and shuffle
     if datasets:
         dataset = concatenate_datasets(datasets)
@@ -131,14 +135,14 @@ if __name__ == "__main__":
     # init model after trainingArgs init
     model = AutoModelForCausalLM.from_pretrained(args.model,
                                                  torch_dtype=torch.bfloat16)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
+    optimizer = torch.optim.AdamW(model.parameters(),
+                                  lr=args.learning_rate)
 
     trainer = SFTTrainer(
         model=model,
         train_dataset=dataset["train"],
         eval_dataset=dataset["validation"],
         formatting_func=formatting_func,
-        max_seq_length=MAX_INPUT_LENGTHS[args.model] + MAX_OUTPUT_LENGTHS[args.model] + 10,
         args=training_args,
         callbacks=[EarlyStoppingCallback(early_stopping_patience=5)],
     )
