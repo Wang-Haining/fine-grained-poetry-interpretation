@@ -4,7 +4,7 @@ from nltk.tokenize import casual_tokenize
 import numpy as np
 from sklearn.model_selection import train_test_split
 
-POETRY_INTERPRETATION_CORPUS = 'interpretation/poetry_interpretation_corpus_v001.hf'
+POEM_INTERPRETATION_CORPUS = 'interpretation/poem_interpretation_corpus_v001.hf'
 
 # load datasets
 pf_ds = pd.read_parquet('interpretation/poetry_foundation.parquet')  # 13,854
