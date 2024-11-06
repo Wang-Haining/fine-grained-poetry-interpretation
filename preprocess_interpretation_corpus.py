@@ -64,3 +64,8 @@ corpus_stats['percentile_length_distribution']['interpretation'] = interpretatio
 print('Poetry Interpretation Corpus Statistics:')
 for key, value in corpus_stats.items():
     print(f"{key}: {value}")
+
+# Poetry Interpretation Corpus Statistics:
+# number_of_entries: {'poetry_foundation': 13802, 'public_domain_poetry': 37554}
+# number_of_authors: 3524
+# percentile_length_distribution: {'poem': [119.0, 191.0, 369.0, 60430.0], 'interpretation': [802.0, 898.0, 1025.0, 4450.0]}
