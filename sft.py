@@ -73,7 +73,7 @@ if __name__ == "__main__":
                         choices=['allenai/OLMo-1B-0724-hf', 'google/gemma-2-2b'],
                         help="A huggingface model's name")
     parser.add_argument("--corpus", type=str,
-                        choices=['poetry_foundation', 'public_domain_poetry', 'all_poetry'],
+                        choices=['poem_interpretation', 'all_poetry'],
                         nargs='+', help="One or more corpora to use; if multiple are selected, "
                         "they will be mixed proportionally based on their sizes "
                         "(i.e., proportional random sampling)")
