@@ -87,8 +87,10 @@ if __name__ == "__main__":
 
     run_name = f'sft_{args.model.split("/")[-1]}'
 
-    training_args = TrainingArguments(
+    training_args = SFTConfig(
         output_dir=f"{CKPTS_DIR}/{run_name}",
+        packing=True,
+        eval_packing=False,
         overwrite_output_dir=True,
         num_train_epochs=50.0,
         do_train=True,
@@ -101,12 +103,12 @@ if __name__ == "__main__":
         lr_scheduler_type='constant_with_warmup',
         warmup_steps=50,
         weight_decay=1e-1,
-        logging_steps=100,
-        eval_steps=100,
+        logging_steps=500,
+        eval_steps=500,
         bf16=True,
         report_to="wandb",
         load_best_model_at_end=True,
-        save_steps=100,
+        save_steps=500,
         save_total_limit=3,
         remove_unused_columns=True,
         gradient_checkpointing=args.gradient_checkpointing,
@@ -138,8 +140,7 @@ if __name__ == "__main__":
                                                  torch_dtype=torch.bfloat16)
     optimizer = torch.optim.AdamW(model.parameters(),
                                   lr=args.learning_rate)
-    config = SFTConfig(packing=True,
-                       eval_packing=False)
+
     trainer = SFTTrainer(
         model=model,
         train_dataset=train_dataset,
