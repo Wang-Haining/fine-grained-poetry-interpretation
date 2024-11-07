@@ -15,4 +15,4 @@ module load Python/3.10.8-GCCcore-12.2.0
 module load CUDA/12.2.0
 
 . .venv/bin/activate
-python -m sft --model google/gemma-2-2b --corpus poem_interpretation --per_device_train_batch_size 4 --gradient_checkpointing --learning_rate 1e-5
+python -m sft --model google/gemma-2-2b --corpus poem_interpretation --per_device_train_batch_size 2 --gradient_checkpointing --learning_rate 1e-5
