@@ -89,6 +89,7 @@ if __name__ == "__main__":
 
     training_args = SFTConfig(
         output_dir=f"{CKPTS_DIR}/{run_name}",
+        max_seq_length=4096,
         packing=False,
         eval_packing=False,
         overwrite_output_dir=True,
