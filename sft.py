@@ -103,7 +103,7 @@ if __name__ == "__main__":
         learning_rate=args.learning_rate,
         lr_scheduler_type='constant_with_warmup',
         warmup_steps=50,
-        weight_decay=1e-1,
+        weight_decay=1e-2,
         logging_steps=500,
         eval_steps=500,
         bf16=True,
