@@ -117,17 +117,21 @@ if __name__ == "__main__":
 
     tokenizer = AutoTokenizer.from_pretrained(args.model, padding_side="right")
     # init dataset
-    datasets = []
+    train_datasets = []
+    eval_datasets = []
     if 'poem_interpretation' in args.corpus:
+        # columns: ['author', 'title', 'poem', 'interpretation', 'source']
         ds = load_from_disk(POEM_INTERPRETATION_CORPUS)
-        datasets.append(ds)
+        train_datasets.append(ds['train'])
+        eval_datasets.append(ds['validation'])
     if 'all_poetry' in args.corpus:
         ds = load_from_disk(ALL_POETRY_CORPUS)
-        datasets.append(ds)
+        train_datasets.append(ds['train'])
+        eval_datasets.append(ds['validation'])
     # combine and shuffle
-    if datasets:
-        dataset = concatenate_datasets(datasets)
-        dataset = dataset.shuffle(seed=42)
+    train_dataset = concatenate_datasets(train_datasets)
+    train_dataset = train_dataset.shuffle(seed=42)
+    eval_dataset = concatenate_datasets(eval_datasets)
 
     # init model after trainingArgs init
     model = AutoModelForCausalLM.from_pretrained(args.model,
@@ -138,8 +142,8 @@ if __name__ == "__main__":
                        eval_packing=False)
     trainer = SFTTrainer(
         model=model,
-        train_dataset=dataset["train"],
-        eval_dataset=dataset["validation"],
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
         formatting_func=formatting_func,
         args=training_args,
         callbacks=[EarlyStoppingCallback(early_stopping_patience=5)],
