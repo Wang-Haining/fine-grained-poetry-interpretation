@@ -132,8 +132,7 @@ if __name__ == "__main__":
         train_datasets.append(ds['train'])
         eval_datasets.append(ds['validation'])
     # combine and shuffle
-    train_dataset = concatenate_datasets(train_datasets)
-    train_dataset = train_dataset.shuffle(seed=42)
+    train_dataset = concatenate_datasets(train_datasets).shuffle(seed=42)
     eval_dataset = concatenate_datasets(eval_datasets)
 
     # init model after trainingArgs init
