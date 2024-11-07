@@ -2,7 +2,7 @@
 #SBATCH --job-name=sft_gemma2_2b
 ##SBATCH --account=group-jasonclark
 #SBATCH --partition=nextgen-gpu
-#SBATCH --gres=gpu:h100:2
+#SBATCH --gres=gpu:h100:1
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=128G
 #SBATCH --time=2-00:00:00
