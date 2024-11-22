@@ -163,7 +163,7 @@ if __name__ == "__main__":
                         help="Output CSV file to save the results")
     args = parser.parse_args()
 
-    tokenizer = AutoTokenizer.from_pretrained(args.model, padding_side="right")
+    tokenizer = AutoTokenizer.from_pretrained(args.model, padding_side="left")
     model = AutoModelForCausalLM.from_pretrained(args.ckpt_path, torch_dtype=torch.bfloat16)
 
     test_datasets = []
