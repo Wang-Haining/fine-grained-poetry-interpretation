@@ -89,10 +89,10 @@ def evaluate_model(model, tokenizer, dataset: Dataset, batch_size: int = 2) -> p
         input_texts = batch['input_text']
         references = batch['reference']
 
-        # Tokenize the input texts
-        inputs = tokenizer(input_texts, return_tensors="pt", padding=True, truncation=True).to(device)
+        # tokenize the input texts
+        inputs = tokenizer(input_texts, return_tensors="pt").to(device)
 
-        # Generate outputs
+        # generate outputs
         outputs = model.generate(
             input_ids=inputs['input_ids'],
             attention_mask=inputs['attention_mask'],
