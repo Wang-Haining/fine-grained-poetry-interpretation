@@ -154,7 +154,6 @@ if __name__ == "__main__":
     parser.add_argument("--ckpt_path", type=str, required=True,
                         help="Path to the model checkpoint directory")
     parser.add_argument("--model", type=str,
-                        choices=['allenai/OLMo-1B-0724-hf', 'google/gemma-2-2b'],
                         required=True,
                         help="Name of the base model")
     parser.add_argument("--corpus", type=str,
