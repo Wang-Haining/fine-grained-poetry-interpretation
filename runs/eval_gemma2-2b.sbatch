@@ -15,4 +15,4 @@ module load Python/3.10.8-GCCcore-12.2.0
 module load CUDA/12.2.0
 
 . .venv/bin/activate
-python -m eval --model google/gemma-2-2b --ckpt_path ckpts/sft_gemma-2-2b/checkpoint-11500 --corpus poem_interpretation --batch_size 40 --output_file results/eval_gemma2_2b.parquet
+python -m eval --model google/gemma-2-2b --ckpt_path ckpts/sft_gemma-2-2b/checkpoint-11500 --corpus poem_interpretation --batch_size 20 --output_file results/eval_gemma2_2b.parquet
