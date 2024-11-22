@@ -90,7 +90,11 @@ def evaluate_model(model, tokenizer, dataset: Dataset, batch_size: int = 2) -> p
         references = batch['reference']
 
         # tokenize the input texts
-        inputs = tokenizer(input_texts, return_tensors="pt").to(device)
+        inputs = tokenizer(input_texts,
+                           return_tensors="pt",
+                           padding=True,
+                           max_length=4096,
+                           truncation=True).to(device)
 
         # generate outputs
         outputs = model.generate(
