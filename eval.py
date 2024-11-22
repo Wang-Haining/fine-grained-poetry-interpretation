@@ -182,6 +182,6 @@ if __name__ == "__main__":
     df = evaluate_model(model, tokenizer, test_dataset, batch_size=args.batch_size)
 
     # save
-    df.to_parquet(args.output_file, index=False)
+    df.to_parquet(args.output_file)
 
     print(f"Evaluation results saved to {args.output_file}")
