@@ -125,7 +125,7 @@ def evaluate_model(model, tokenizer, dataset: Dataset, batch_size: int = 2) -> p
             with torch.no_grad():
                 # prepare the generated text as input for computing perplexity
                 encodings = tokenizer(generated_text, return_tensors='pt').to(device)
-                max_length = model.config.n_positions
+                max_length = 4096
                 # ensure the sequence length does not exceed the model's capacity
                 input_ids = encodings['input_ids'][:, :max_length]
                 attention_mask = encodings['attention_mask'][:, :max_length]
