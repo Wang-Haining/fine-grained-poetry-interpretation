@@ -140,7 +140,7 @@ def evaluate_model(model, tokenizer, dataset: Dataset, batch_size: int = 2) -> p
                 'reference_text': reference_text.strip(),
                 'bleu': bleu_score['bleu'],
                 'meteor': meteor_score['meteor'],
-                'rougeL': rouge_score['rougeL'].mid.fmeasure,
+                'rougeL': rouge_score['rougeL'],
                 'ppl': ppl
             })
 
