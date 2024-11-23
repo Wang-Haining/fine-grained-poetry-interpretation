@@ -18,15 +18,16 @@ print(f"Authenticated as {username}.")
 
 # create a private repository on Hugging Face
 repo_url = api.create_repo(
-    name=repo_name,
+    repo_id=f"{username}/{repo_name}",  # Use repo_id instead of name
     token=HfFolder.get_token(),
     repo_type="dataset",
     private=True,  # make the repository private
+    exist_ok=True,  # Do not raise an error if the repo already exists
 )
 print(f"Repository created at {repo_url}")
 
 # save the dataset to Hugging Face
 print("Pushing dataset to Hugging Face...")
-ds.push_to_hub(repo_name)
+ds.push_to_hub(repo_id=f"{username}/{repo_name}")
 
 print(f"Dataset successfully uploaded to {repo_url}")
