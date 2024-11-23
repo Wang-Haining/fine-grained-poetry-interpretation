@@ -29,12 +29,14 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 CKPTS_DIR = 'ckpts'
 POEM_INTERPRETATION_CORPUS = 'interpretation/poem_interpretation_corpus_v001.hf'
-ALL_POETRY_CORPUS = ''  # Update this path if available
+ALL_POETRY_CORPUS = ''  # todo
 
-# the prompt will be constructed using the chat template provided by the tokenizer
+# combine the system prompt with the user prompt
 PROMPT_INSTRUCTIONS = """You are an assistant that strictly follows user instructions. Provide only the analysis and content requested by the user without any greetings, closing remarks, or unnecessary additions. Do not include any extra text beyond what is required."""
 
 USER_PROMPT_TEMPLATE = """
+{instructions}
+
 Analyze the poem "{title}" by {author}. Please provide a structured, markdown-formatted interpretation following these steps:
 
 1. Summary: Give a brief overview of the poem's main themes and ideas. Summarize the key emotions or messages conveyed by the poet.
@@ -75,7 +77,12 @@ def prepare_examples(examples) -> Dict[str, List[str]]:
     references = []
     for title, author, poem, interpretation in zip(
             examples['title'], examples['author'], examples['poem'], examples['interpretation']):
-        user_prompt = USER_PROMPT_TEMPLATE.format(title=title, author=author, poem=poem)
+        user_prompt = USER_PROMPT_TEMPLATE.format(
+            instructions=PROMPT_INSTRUCTIONS,
+            title=title,
+            author=author,
+            poem=poem
+        )
         inputs.append(user_prompt.strip())
         references.append(interpretation.strip())
     return {'input_text': inputs, 'reference': references}
@@ -116,19 +123,18 @@ def evaluate_model(model, tokenizer, dataset: Dataset, batch_size: int = 2) -> p
         messages_list = []
         for input_text in input_texts:
             messages = [
-                {"role": "system", "content": PROMPT_INSTRUCTIONS},
                 {"role": "user", "content": input_text}
             ]
             messages_list.append(messages)
 
-        # apply chat template and tokenize
+        # Apply chat template and tokenize
         inputs = tokenizer.apply_chat_template(
             messages_list,
+            return_tensors="pt",
+            return_dict=True,
             padding=True,
             max_length=tokenizer.model_max_length,
-            truncation=True,
-            return_tensors="pt",
-            add_special_tokens=False
+            truncation=True
         ).to(device)
 
         # calculate max_new_tokens to not exceed model's max length
@@ -141,8 +147,7 @@ def evaluate_model(model, tokenizer, dataset: Dataset, batch_size: int = 2) -> p
 
         # generate outputs
         outputs = model.generate(
-            input_ids=inputs['input_ids'],
-            attention_mask=inputs['attention_mask'],
+            **inputs,
             max_new_tokens=max_new_tokens,
             do_sample=True,
             temperature=0.7,
@@ -158,16 +163,23 @@ def evaluate_model(model, tokenizer, dataset: Dataset, batch_size: int = 2) -> p
             # extract the assistant's response from the generated text
             # assuming the assistant's response follows the <start_of_turn>model token
             # and ends with <end_of_turn>
-            start_token = tokenizer.additional_special_tokens_ids[tokenizer.additional_special_tokens.index('<start_of_turn>')]  # model's start token
-            end_token = tokenizer.additional_special_tokens_ids[tokenizer.additional_special_tokens.index('<end_of_turn>')]  # end of turn token
+            start_token = tokenizer.additional_special_tokens_ids[
+                tokenizer.additional_special_tokens.index('<start_of_turn>')
+            ]  # model's start token
+            end_token = tokenizer.additional_special_tokens_ids[
+                tokenizer.additional_special_tokens.index('<end_of_turn>')
+            ]  # end of turn token
 
             # find the indices of the assistant's response
             start_indices = (output_ids == start_token).nonzero(as_tuple=True)[0]
             end_indices = (output_ids == end_token).nonzero(as_tuple=True)[0]
 
-            if len(start_indices) > 0 and len(end_indices) > 0:
+            if len(start_indices) > 0:
                 start_idx = start_indices[-1] + 1
-                end_idx = end_indices[-1]
+                if len(end_indices) > 0 and end_indices[-1] > start_idx:
+                    end_idx = end_indices[-1]
+                else:
+                    end_idx = output_ids.size(0)
                 assistant_ids = output_ids[start_idx:end_idx]
                 assistant_response = tokenizer.decode(assistant_ids, skip_special_tokens=True).strip()
             else:
@@ -177,7 +189,7 @@ def evaluate_model(model, tokenizer, dataset: Dataset, batch_size: int = 2) -> p
             reference_text = references[i]
             input_text = input_texts[i]
 
-            # Compute per-sample metrics
+            # compute per-sample metrics
             bleu_score = bleu_metric.compute(predictions=[assistant_response], references=[[reference_text]])
             meteor_score = meteor_metric.compute(predictions=[assistant_response], references=[reference_text])
             rouge_score = rouge_metric.compute(
