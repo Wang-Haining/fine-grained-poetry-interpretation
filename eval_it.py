@@ -127,19 +127,19 @@ def evaluate_model(model, tokenizer, dataset: Dataset, batch_size: int = 2) -> p
             ]
             messages_list.append(messages)
 
-        # Apply chat template and tokenize
+        # apply chat template and tokenize
         inputs = tokenizer.apply_chat_template(
             messages_list,
             return_tensors="pt",
             return_dict=True,
             padding=True,
-            max_length=tokenizer.model_max_length,
+            max_length=4096,  # set max_length to a reasonable value
             truncation=True
         ).to(device)
 
         # calculate max_new_tokens to not exceed model's max length
         input_lengths = inputs['input_ids'].shape[1]
-        max_model_length = tokenizer.model_max_length
+        max_model_length = 4096  # Use the same value as max_length
         max_new_tokens = max_model_length - input_lengths
         if max_new_tokens <= 0:
             print("Warning: Input length exceeds the model's maximum context length. Truncating input.")
@@ -189,7 +189,7 @@ def evaluate_model(model, tokenizer, dataset: Dataset, batch_size: int = 2) -> p
             reference_text = references[i]
             input_text = input_texts[i]
 
-            # compute per-sample metrics
+            # Compute per-sample metrics
             bleu_score = bleu_metric.compute(predictions=[assistant_response], references=[[reference_text]])
             meteor_score = meteor_metric.compute(predictions=[assistant_response], references=[reference_text])
             rouge_score = rouge_metric.compute(
@@ -202,7 +202,7 @@ def evaluate_model(model, tokenizer, dataset: Dataset, batch_size: int = 2) -> p
             with torch.no_grad():
                 # prepare the generated text as input for computing perplexity
                 encodings = tokenizer(assistant_response, return_tensors='pt').to(device)
-                max_length = tokenizer.model_max_length
+                max_length = 4096  # Ensure this matches the model's max length
                 # ensure the sequence length does not exceed the model's capacity
                 input_ids_ppl = encodings['input_ids'][:, :max_length]
                 attention_mask_ppl = encodings['attention_mask'][:, :max_length]
