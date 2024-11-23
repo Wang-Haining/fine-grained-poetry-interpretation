@@ -15,4 +15,4 @@ module load Python/3.10.8-GCCcore-12.2.0
 module load CUDA/12.2.0
 
 . .venv/bin/activate
-python -m eval_it --model google/gemma-2-2b-it --corpus poem_interpretation --batch_size 20 --output_file results/eval_gemma2_2b_it.parquet
+python -m eval_it --hf_model google/gemma-2-2b-it --corpus poem_interpretation --batch_size 20 --output_file results/eval_gemma2_2b_it.parquet
