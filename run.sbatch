@@ -28,13 +28,18 @@ MAX_SEQS="${MAX_SEQS:-64}"
 GPU_UTIL="${GPU_UTIL:-0.85}"
 
 # ---- app settings ----
-READ_TIMEOUT="${READ_TIMEOUT:-1800}"
+READ_TIMEOUT="${READ_TIMEOUT:-600}"
 
 # ---- paths and container ----
 HF_HOME="${HF_HOME:-$HOME/hf-cache}"
 IMG_FILE="${IMG_FILE:-$HOME/containers/vllm-gptoss.sif}"
 HOST="${HOST:-127.0.0.1}"
 PORT="${PORT:-8020}"
+
+# ---- httpx tuning for GuardedBackend ----
+export HTTP_POOL="${HTTP_POOL:-256}"
+export HTTP_KEEPALIVE="${HTTP_KEEPALIVE:-120}"
+export HTTP_POOL_TIMEOUT="${HTTP_POOL_TIMEOUT:-600}"
 
 # ---- poetry attrs settings ----
 OUT_DIR="${OUT_DIR:-poem_attrs}"
