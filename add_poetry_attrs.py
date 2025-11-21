@@ -5,6 +5,7 @@ resumability:
 - provenance.jsonl tracks status per row index
 - per-row outputs stored as json in out_dir/rows/{index}.json
 - reruns skip successful rows automatically
+
 """
 
 from __future__ import annotations
@@ -41,34 +42,129 @@ emotion_labels = [
 sentiment_labels = ["positive", "negative", "neutral"]
 
 theme_labels = [
-    "nature", "body", "death", "love", "existential", "identity", "self",
-    "beauty", "america", "loss", "animals", "history", "memories", "family",
-    "writing", "ancestry", "thought", "landscapes", "war", "time", "religion",
-    "grief", "violence", "aging", "childhood", "desire", "night", "mothers",
-    "language", "birds", "social justice", "music", "flowers", "politics",
-    "hope", "heartache", "fathers", "gender", "environment", "spirituality",
-    "loneliness", "oceans", "dreams", "survival", "cities", "earth", "despair",
-    "anxiety", "weather", "illness", "home",
+    "nature",
+    "body",
+    "death",
+    "love",
+    "existential",
+    "identity",
+    "self",
+    "beauty",
+    "america",
+    "loss",
+    "animals",
+    "history",
+    "memories",
+    "family",
+    "writing",
+    "ancestry",
+    "thought",
+    "landscapes",
+    "war",
+    "time",
+    "religion",
+    "grief",
+    "violence",
+    "aging",
+    "childhood",
+    "desire",
+    "night",
+    "mothers",
+    "language",
+    "birds",
+    "social justice",
+    "music",
+    "flowers",
+    "politics",
+    "hope",
+    "heartache",
+    "fathers",
+    "gender",
+    "environment",
+    "spirituality",
+    "loneliness",
+    "oceans",
+    "dreams",
+    "survival",
+    "cities",
+    "earth",
+    "despair",
+    "anxiety",
+    "weather",
+    "illness",
+    "home",
 ]
 
 
 class PoemAttrs(BaseModel):
     emotion: Literal[
-        "fear", "anger", "trust", "sadness", "disgust", "anticipation", "joy", "surprise"
+        "fear",
+        "anger",
+        "trust",
+        "sadness",
+        "disgust",
+        "anticipation",
+        "joy",
+        "surprise",
     ] = Field(description="primary emotion label from the fixed set")
     sentiment: Literal["positive", "negative", "neutral"] = Field(
         description="overall sentiment label"
     )
-    themes: List[Literal[
-        "nature", "body", "death", "love", "existential", "identity", "self",
-        "beauty", "america", "loss", "animals", "history", "memories", "family",
-        "writing", "ancestry", "thought", "landscapes", "war", "time", "religion",
-        "grief", "violence", "aging", "childhood", "desire", "night", "mothers",
-        "language", "birds", "social justice", "music", "flowers", "politics",
-        "hope", "heartache", "fathers", "gender", "environment", "spirituality",
-        "loneliness", "oceans", "dreams", "survival", "cities", "earth", "despair",
-        "anxiety", "weather", "illness", "home"
-    ]] = Field(default_factory=list, description="0+ theme labels from the fixed set")
+    themes: List[
+        Literal[
+            "nature",
+            "body",
+            "death",
+            "love",
+            "existential",
+            "identity",
+            "self",
+            "beauty",
+            "america",
+            "loss",
+            "animals",
+            "history",
+            "memories",
+            "family",
+            "writing",
+            "ancestry",
+            "thought",
+            "landscapes",
+            "war",
+            "time",
+            "religion",
+            "grief",
+            "violence",
+            "aging",
+            "childhood",
+            "desire",
+            "night",
+            "mothers",
+            "language",
+            "birds",
+            "social justice",
+            "music",
+            "flowers",
+            "politics",
+            "hope",
+            "heartache",
+            "fathers",
+            "gender",
+            "environment",
+            "spirituality",
+            "loneliness",
+            "oceans",
+            "dreams",
+            "survival",
+            "cities",
+            "earth",
+            "despair",
+            "anxiety",
+            "weather",
+            "illness",
+            "home",
+        ]
+    ] = Field(default_factory=list, description="0+ theme labels from the fixed set")
 
     @field_validator("emotion", mode="before")
     @classmethod
@@ -326,7 +422,9 @@ async def run_all(args: argparse.Namespace) -> None:
 
 def build_cli() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="add emotion/sentiment/themes to corpus")
-    ap.add_argument("--base_url", type=str, required=True, help="vllm openai api base url")
+    ap.add_argument(
+        "--base_url", type=str, required=True, help="vllm openai api base url"
+    )
     ap.add_argument("--model", type=str, default="openai/gpt-oss-120b")
     ap.add_argument("--read_timeout", type=float, default=1800.0)
     ap.add_argument("--out_dir", type=str, default="poem_attrs")

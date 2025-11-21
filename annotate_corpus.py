@@ -7,6 +7,7 @@ annotate interpretation corpus with emotion, sentiment, themes.
 - resumable via provenance.jsonl + per-sample json files
 
 note: no custom names start with "_" per user requirement.
+
 """
 
 from __future__ import annotations
@@ -25,7 +26,9 @@ from guarded_backend import GuardedBackend
 
 logger = logging.getLogger(__name__)
 if not logger.handlers:
-    logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
+    )
 
 
 # ----------------------------
@@ -36,14 +39,57 @@ Emotion = Literal[
 ]
 Sentiment = Literal["positive", "negative", "neutral"]
 Theme = Literal[
-    "nature", "body", "death", "love", "existential", "identity", "self",
-    "beauty", "america", "loss", "animals", "history", "memories", "family",
-    "writing", "ancestry", "thought", "landscapes", "war", "time", "religion",
-    "grief", "violence", "aging", "childhood", "desire", "night", "mothers",
-    "language", "birds", "social justice", "music", "flowers", "politics",
-    "hope", "heartache", "fathers", "gender", "environment", "spirituality",
-    "loneliness", "oceans", "dreams", "survival", "cities", "earth", "despair",
-    "anxiety", "weather", "illness", "home"
+    "nature",
+    "body",
+    "death",
+    "love",
+    "existential",
+    "identity",
+    "self",
+    "beauty",
+    "america",
+    "loss",
+    "animals",
+    "history",
+    "memories",
+    "family",
+    "writing",
+    "ancestry",
+    "thought",
+    "landscapes",
+    "war",
+    "time",
+    "religion",
+    "grief",
+    "violence",
+    "aging",
+    "childhood",
+    "desire",
+    "night",
+    "mothers",
+    "language",
+    "birds",
+    "social justice",
+    "music",
+    "flowers",
+    "politics",
+    "hope",
+    "heartache",
+    "fathers",
+    "gender",
+    "environment",
+    "spirituality",
+    "loneliness",
+    "oceans",
+    "dreams",
+    "survival",
+    "cities",
+    "earth",
+    "despair",
+    "anxiety",
+    "weather",
+    "illness",
+    "home",
 ]
 
 
@@ -54,9 +100,7 @@ class PoemLabels(BaseModel):
     sentiment: Sentiment = Field(
         description="overall sentiment: positive, negative, or neutral"
     )
-    themes: List[Theme] = Field(
-        description="0-5 themes from the allowed set"
-    )
+    themes: List[Theme] = Field(description="0-5 themes from the allowed set")
 
     @field_validator("emotion")
     @classmethod
@@ -127,19 +171,68 @@ def build_prompts(
     use_interpretation: bool,
 ) -> Tuple[str, str]:
     allowed_emotions = [
-        "fear", "anger", "trust", "sadness", "disgust",
-        "anticipation", "joy", "surprise",
+        "fear",
+        "anger",
+        "trust",
+        "sadness",
+        "disgust",
+        "anticipation",
+        "joy",
+        "surprise",
     ]
     allowed_sentiments = ["positive", "negative", "neutral"]
     allowed_themes = [
-        "nature", "body", "death", "love", "existential", "identity", "self",
-        "beauty", "america", "loss", "animals", "history", "memories", "family",
-        "writing", "ancestry", "thought", "landscapes", "war", "time", "religion",
-        "grief", "violence", "aging", "childhood", "desire", "night", "mothers",
-        "language", "birds", "social justice", "music", "flowers", "politics",
-        "hope", "heartache", "fathers", "gender", "environment", "spirituality",
-        "loneliness", "oceans", "dreams", "survival", "cities", "earth", "despair",
-        "anxiety", "weather", "illness", "home",
+        "nature",
+        "body",
+        "death",
+        "love",
+        "existential",
+        "identity",
+        "self",
+        "beauty",
+        "america",
+        "loss",
+        "animals",
+        "history",
+        "memories",
+        "family",
+        "writing",
+        "ancestry",
+        "thought",
+        "landscapes",
+        "war",
+        "time",
+        "religion",
+        "grief",
+        "violence",
+        "aging",
+        "childhood",
+        "desire",
+        "night",
+        "mothers",
+        "language",
+        "birds",
+        "social justice",
+        "music",
+        "flowers",
+        "politics",
+        "hope",
+        "heartache",
+        "fathers",
+        "gender",
+        "environment",
+        "spirituality",
+        "loneliness",
+        "oceans",
+        "dreams",
+        "survival",
+        "cities",
+        "earth",
+        "despair",
+        "anxiety",
+        "weather",
+        "illness",
+        "home",
     ]
 
     sys_prompt = (
@@ -199,7 +292,11 @@ async def annotate_one(
         poem, interpretation, use_interpretation=use_interpretation
     )
 
-    schema = {"name": "PoemLabels", "schema": PoemLabels.model_json_schema(), "strict": True}
+    schema = {
+        "name": "PoemLabels",
+        "schema": PoemLabels.model_json_schema(),
+        "strict": True,
+    }
 
     labels: PoemLabels = await backend.guardrail(
         messages=[
@@ -274,7 +371,11 @@ async def main_async(args: argparse.Namespace) -> None:
     async def bounded_run(row: Dict[str, Any]) -> None:
         sid = str(row["sample_id"])
         poem = str(row.get("poem", "") or "")
-        interp = str(row.get("interpretation", "") or "") if args.use_interpretation else None
+        interp = (
+            str(row.get("interpretation", "") or "")
+            if args.use_interpretation
+            else None
+        )
 
         if sid not in todo:
             return
