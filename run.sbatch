@@ -12,7 +12,6 @@
 #SBATCH --mail-user=haining.wang@montana.edu
 #SBATCH --mail-type=ALL
 
-
 set -euo pipefail
 
 # ---- environment setup (tempest) ----
@@ -23,8 +22,9 @@ source .venv/bin/activate
 
 # ---- model/server knobs ----
 MODEL="${MODEL:-openai/gpt-oss-120b}"
-MAXLEN="${MAXLEN:-124000}"
-MAX_SEQS="${MAX_SEQS:-512}"
+# poems are short; no need for a giant context
+MAXLEN="${MAXLEN:-16384}"
+MAX_SEQS="${MAX_SEQS:-64}"
 GPU_UTIL="${GPU_UTIL:-0.85}"
 
 # ---- app settings ----
@@ -42,7 +42,6 @@ SPLIT="${SPLIT:-train}"
 MAX_CONCURRENT="${MAX_CONCURRENT:-32}"
 LIMIT="${LIMIT:-0}"  # 0 means no limit
 
-# cuda bind and logging
 CUDA_BIND="/mnt/shared/moduleapps/eb/CUDA/12.3.0"
 export PYTHONUNBUFFERED=1
 STDBUF="$(command -v stdbuf >/dev/null 2>&1 && echo 'stdbuf -oL -eL' || true)"
@@ -51,7 +50,7 @@ mkdir -p logs "$HF_HOME" "$OUT_DIR"
 export PYTHONPATH="$PWD:${PYTHONPATH:-}"
 ulimit -n 65535 || true
 
-# make env token also honor file-based token without branching
+# HF token via env or file
 export HF_TOKEN="${HF_TOKEN:-$(cat "$HF_HOME/token" 2>/dev/null || echo)}"
 
 echo "[info] poetry-attrs job starting"
@@ -61,50 +60,11 @@ echo "[split] SPLIT=${SPLIT}"
 echo "[parallel] MAX_CONCURRENT=${MAX_CONCURRENT}"
 echo "[limit] LIMIT=${LIMIT}"
 
-# ============================================================================
-# SERVER SETUP
-# ============================================================================
-
-# ---- collision-proof port selection ----
-port_in_use() {
-    if command -v ss >/dev/null 2>&1; then
-        ss -ltn 2>/dev/null | awk '{print $4}' | grep -E "[:]$1\$" -q
-    else
-        netstat -ltn 2>/dev/null | grep -E "[: ]$1 " -q
-    fi
-}
-
-choose_free_port() {
-    p="${1:-8020}"
-    for _ in $(seq 0 100); do
-        port_in_use "$p" || { echo "$p"; return; }
-        p=$((p+1))
-    done
-    echo "${1:-8020}"
-}
-
-# ---- GPU detection ----
-detect_gpu_count() {
-    [[ -n "${GPU_COUNT:-}" && "${GPU_COUNT}" -gt 0 ]] && { echo "${GPU_COUNT}"; return; }
-    if command -v nvidia-smi >/dev/null 2>&1; then
-        n=$(nvidia-smi -L 2>/dev/null | wc -l | awk '{print $1}')
-        [[ "$n" =~ ^[0-9]+$ && "$n" -gt 0 ]] && { echo "$n"; return; }
-    fi
-    [[ -n "${CUDA_VISIBLE_DEVICES:-}" ]] && {
-        IFS=, read -ra g <<< "${CUDA_VISIBLE_DEVICES}"
-        [[ "${#g[@]}" -gt 0 ]] && { echo "${#g[@]}"; return; }
-    }
-    echo 1  # default for this job (1x H100)
-}
-
-GPUC="$(detect_gpu_count)"
-TP="${TP:-1}"
-PORT="$(choose_free_port "$PORT")"
 API="http://${HOST}:${PORT}"
+TP=1
 
 echo "[server] starting vLLM on ${API} (tensor-parallel=${TP})"
 
-# ---- start vLLM server ----
 command -v apptainer >/dev/null || { echo "[fatal] apptainer missing"; exit 90; }
 [[ -f "$IMG_FILE" ]] || { echo "[fatal] image missing: $IMG_FILE"; exit 91; }
 
@@ -126,21 +86,19 @@ python3 -m vllm.entrypoints.openai.api_server \
 
 trap 'echo "[info] stopping..."; kill $SERVER_PID 2>/dev/null || true; wait $SERVER_PID 2>/dev/null || true' EXIT
 
-# ---- wait for server ready  ----
 echo "[server] waiting for readiness..."
-for ((t=1;t<=600;t++)); do
-  curl -fsS "${API}/v1/models" >/dev/null 2>&1 && { echo "[server] ready after ${t}s"; break; }
-  (( t > 60 )) && sleep 2 || sleep 1
+for ((t=1;t<=300;t++)); do
+  if curl -fsS "${API}/v1/models" >/dev/null 2>&1; then
+    echo "[server] ready after ${t}s"
+    break
+  fi
+  sleep 1
 done
 
-# ---- warm up ----
 echo "[server] warming up..."
 curl -fsS "${API}/v1/chat/completions" -H "Content-Type: application/json" \
   -d '{"model":"'"${MODEL}"'","messages":[{"role":"user","content":"ping"}],"max_tokens":1}' >/dev/null || true
 
-# ============================================================================
-# RUN POETRY ATTR EXTRACTION
-# ============================================================================
 echo "[poetry] starting annotation..."
 START_TS="$(date +%s)"
 
