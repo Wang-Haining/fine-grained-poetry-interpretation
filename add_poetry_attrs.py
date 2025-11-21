@@ -262,6 +262,14 @@ def build_messages(row: Dict[str, str]) -> List[Dict[str, str]]:
     author = (row.get("author") or "").strip()
     poem = (row.get("poem") or "").strip()
     interpretation = (row.get("interpretation") or "").strip()
+    # hard cap lengths to keep context light
+
+    max_poem_chars = 8000
+    max_interp_chars = 8000
+    if len(poem) > max_poem_chars:
+        poem = poem[:max_poem_chars]
+    if len(interpretation) > max_interp_chars:
+        interpretation = interpretation[:max_interp_chars]
 
     # if poem is empty or clearly masked, allow interpretation as weak fallback
     poem_missing = (not poem) or ("[mask" in poem.lower()) or ("<mask" in poem.lower())
@@ -286,8 +294,8 @@ emotion:
 - do not return multiple emotions.
 
 sentiment:
-- positive = overall valence uplifting/affirming.
-- negative = overall valence bleak/critical/painful.
+- positive = overall valence uplifting or affirming.
+- negative = overall valence bleak, critical, or painful.
 - neutral = mixed or primarily descriptive without clear valence.
 
 themes:
@@ -352,6 +360,7 @@ async def annotate_one(
             temperature=0.2,
             top_p=1.0,
             reasoning_effort="high",
+            max_tokens=256,
         )
 
         payload = {
@@ -410,9 +419,13 @@ async def run_all(args: argparse.Namespace) -> None:
 
     tasks = [bounded(i) for i in indexes_to_process]
 
-    for coro in atqdm.as_completed(tasks, total=len(tasks), desc="annotating"):
+    for fut in atqdm(
+        asyncio.as_completed(tasks),
+        total=len(tasks),
+        desc="annotating",
+    ):
         try:
-            await coro
+            await fut
         except Exception as exc:
             logger.error(f"row failed: {exc}")
 

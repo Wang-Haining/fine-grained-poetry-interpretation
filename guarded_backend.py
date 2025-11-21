@@ -4,7 +4,7 @@ async guarded backend for an openai-compatible vllm server.
 features:
 - async httpx client with keepalive
 - optional structured output via json schema
-- pydantic validation + hinted retry using guardrails
+- pydantic validation plus hinted retry using guardrails
 """
 
 from __future__ import annotations
@@ -119,7 +119,7 @@ class GuardedBackend:
         messages: List[Dict[str, Any]],
         temperature: float = 0.0,
         top_p: float = 1.0,
-        max_tokens: int = 2048,
+        max_tokens: int = 256,
         json_schema: Optional[Dict[str, Any]] = None,
         reasoning_effort: Optional[str] = None,
     ) -> Dict[str, Any]:
@@ -145,7 +145,6 @@ class GuardedBackend:
         resp = await self.post_json("/v1/chat/completions", payload)
 
         if resp.status_code == 500 and json_schema is not None:
-            # minimal fallback: relax strict then json_object
             try_payload = dict(payload)
             schema_rf = dict(try_payload.get("response_format", {}))
             schema_block = dict(schema_rf.get("json_schema", {}))
@@ -178,6 +177,7 @@ class GuardedBackend:
         temperature: float = 0.0,
         top_p: float = 1.0,
         reasoning_effort: str = "high",
+        max_tokens: int = 256,
     ) -> BaseModel:
         guard = self.guards.get(response_model)
         if guard is None:
@@ -195,6 +195,7 @@ class GuardedBackend:
                     top_p=top_p,
                     json_schema=json_schema,
                     reasoning_effort=reasoning_effort,
+                    max_tokens=max_tokens,
                 )
             except Exception as exc:
                 last_error = exc
@@ -202,12 +203,19 @@ class GuardedBackend:
                 continue
 
             try:
-                choice = (resp.get("choices") or [{}])[0]
+                choices = resp.get("choices") or []
+                choice = choices[0] if choices else {}
                 msg = choice.get("message") or {}
                 content = msg.get("parsed")
+
                 if content is None:
-                    raw = msg.get("content", "")
-                    content = json.loads(raw)
+                    raw = msg.get("content")
+                    if isinstance(raw, str):
+                        content = json.loads(raw)
+                    elif isinstance(raw, dict):
+                        content = raw
+                    else:
+                        raise ValueError("no json content returned")
             except Exception as exc:
                 last_error = exc
                 continue
@@ -223,7 +231,6 @@ class GuardedBackend:
                 last_error = exc
                 error_text = str(exc)
 
-                # hinted re-ask using guardrails' standard error cue
                 hint = (
                     "validation failed. fix the json to satisfy the schema exactly. "
                     f"errors: {error_text}. output json only."
