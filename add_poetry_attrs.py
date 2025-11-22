@@ -402,26 +402,19 @@ async def annotate_one(
 
 
 async def run_all(args: argparse.Namespace) -> None:
-    out_dir = Path(args.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    root_out = Path(args.out_dir)
+    root_out.mkdir(parents=True, exist_ok=True)
 
-    prov = load_provenance(out_dir)
-
-    ds = load_dataset("haining/poem_interpretation_corpus", split=args.split)
-    total = len(ds)
-    limit = int(args.limit)
-    if limit > 0:
-        total = min(total, limit)
-
-    indexes_to_process: List[int] = []
-    for index in range(total):
-        entry = prov.get(index)
-        out_file = out_dir / "rows" / f"{index}.json"
-        if entry and entry.status == "success" and out_file.exists():
-            continue
-        indexes_to_process.append(index)
-
-    logger.info(f"processing {len(indexes_to_process)}/{total} rows")
+    # load all splits; user can pick subset or "all"
+    ds_dict = load_dataset("haining/poem_interpretation_corpus")
+    available = list(ds_dict.keys())
+    if args.splits.lower() == "all":
+        splits = available
+    else:
+        wanted = [s.strip() for s in args.splits.split(",") if s.strip()]
+        splits = [s for s in wanted if s in available]
+    logger.info(f"available splits: {available}")
+    logger.info(f"selected splits: {splits}")
 
     backend = GuardedBackend(
         base_url=args.base_url,
@@ -429,33 +422,55 @@ async def run_all(args: argparse.Namespace) -> None:
         read_timeout=float(args.read_timeout),
     )
 
-    semaphore = asyncio.Semaphore(int(args.max_concurrent))
+    # process splits sequentially
+    for split in splits:
+        out_dir = root_out / split
+        rows_dir = out_dir / "rows"
+        rows_dir.mkdir(parents=True, exist_ok=True)
 
-    async def bounded(idx: int) -> None:
-        async with semaphore:
-            row = dict(ds[idx])
-            await annotate_one(
-                backend=backend,
-                row=row,
-                index=idx,
-                out_dir=out_dir,
-                prov=prov,
-            )
+        prov = load_provenance(out_dir)
+        ds = ds_dict[split]
+        total = len(ds)
+        if args.limit and args.limit > 0:
+            total = min(total, int(args.limit))
 
-    tasks = [bounded(i) for i in indexes_to_process]
+        indexes_to_process: List[int] = []
+        for index in range(total):
+            entry = prov.get(index)
+            out_file = rows_dir / f"{index}.json"
+            if entry and entry.status == "success" and out_file.exists():
+                continue
+            indexes_to_process.append(index)
 
-    for fut in atqdm(
-        asyncio.as_completed(tasks),
-        total=len(tasks),
-        desc="annotating",
-    ):
-        try:
-            await fut
-        except Exception as exc:
-            logger.error(f"row failed: {exc}")
+        logger.info(f"[{split}] processing {len(indexes_to_process)}/{total} rows")
+        sem = asyncio.Semaphore(int(args.max_concurrent))
+
+        async def bounded(index: int) -> None:
+            async with sem:
+                row = dict(ds[index])
+                await annotate_one(
+                    backend=backend,
+                    row=row,
+                    index=index,
+                    out_dir=out_dir,  # split-scoped directory
+                    prov=prov,
+                )
+
+        tasks = [asyncio.create_task(bounded(i)) for i in indexes_to_process]
+
+        # progress shows as tasks complete
+        for fut in atqdm.as_completed(
+            tasks, total=len(tasks), desc=f"annotating:{split}"
+        ):
+            try:
+                await fut
+            except Exception as exc:
+                logger.error(f"[{split}] row failed: {exc}")
+
+        logger.info(f"[{split}] complete")
 
     await backend.close()
-    logger.info("done")
+    logger.info("all splits done")
 
 
 def build_cli() -> argparse.ArgumentParser:
@@ -466,9 +481,10 @@ def build_cli() -> argparse.ArgumentParser:
     ap.add_argument("--model", type=str, default="openai/gpt-oss-120b")
     ap.add_argument("--read_timeout", type=float, default=1800.0)
     ap.add_argument("--out_dir", type=str, default="poem_attrs")
-    ap.add_argument("--split", type=str, default="train")
+    # NEW: support "all" or comma-separated list like "train,validation,test"
+    ap.add_argument("--splits", type=str, default="all")
     ap.add_argument("--max_concurrent", type=int, default=32)
-    ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--limit", type=int, default=0)  # per-split cap; 0 = no cap
     return ap
 
 

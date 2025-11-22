@@ -24,7 +24,7 @@ source .venv/bin/activate
 MODEL="${MODEL:-openai/gpt-oss-120b}"
 # poems are short; no need for a giant context
 MAXLEN="${MAXLEN:-16384}"
-MAX_SEQS="${MAX_SEQS:-64}"
+MAX_SEQS="${MAX_SEQS:-16}"
 GPU_UTIL="${GPU_UTIL:-0.85}"
 
 # ---- app settings ----
@@ -43,10 +43,10 @@ export HTTP_POOL_TIMEOUT="${HTTP_POOL_TIMEOUT:-600}"
 
 # ---- poetry attrs settings ----
 OUT_DIR="${OUT_DIR:-poem_attrs}"
-SPLIT="${SPLIT:-train}"
+# NEW: support all splits or a comma list like "train,validation,test"
+SPLITS="${SPLITS:-all}"
 MAX_CONCURRENT="${MAX_CONCURRENT:-8}"
 LIMIT="${LIMIT:-0}"
-
 
 CUDA_BIND="/mnt/shared/moduleapps/eb/CUDA/12.3.0"
 export PYTHONUNBUFFERED=1
@@ -62,7 +62,7 @@ export HF_TOKEN="${HF_TOKEN:-$(cat "$HF_HOME/token" 2>/dev/null || echo)}"
 echo "[info] poetry-attrs job starting"
 echo "[output] OUT_DIR=${OUT_DIR}"
 echo "[model] MODEL=${MODEL}"
-echo "[split] SPLIT=${SPLIT}"
+echo "[splits] SPLITS=${SPLITS}"
 echo "[parallel] MAX_CONCURRENT=${MAX_CONCURRENT}"
 echo "[limit] LIMIT=${LIMIT}"
 
@@ -113,7 +113,7 @@ CMD="$STDBUF python add_poetry_attrs.py \
   --model \"${MODEL}\" \
   --read_timeout \"${READ_TIMEOUT}\" \
   --out_dir \"${OUT_DIR}\" \
-  --split \"${SPLIT}\" \
+  --splits \"${SPLITS}\" \
   --max_concurrent \"${MAX_CONCURRENT}\" \
   --limit \"${LIMIT}\""
 
