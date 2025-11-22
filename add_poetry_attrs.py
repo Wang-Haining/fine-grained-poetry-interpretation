@@ -305,7 +305,7 @@ def build_messages(row: Dict[str, str]) -> List[Dict[str, str]]:
     poem = (row.get("poem") or "").strip()
     interpretation = (row.get("interpretation") or "").strip()
 
-    # hard cap lengths to keep context light
+    # keep context light and predictable
     max_poem_chars = 8000
     max_interp_chars = 8000
     if len(poem) > max_poem_chars:
@@ -313,46 +313,26 @@ def build_messages(row: Dict[str, str]) -> List[Dict[str, str]]:
     if len(interpretation) > max_interp_chars:
         interpretation = interpretation[:max_interp_chars]
 
-    # if poem is empty or clearly masked, allow interpretation as weak fallback
     poem_missing = (not poem) or ("[mask" in poem.lower()) or ("<mask" in poem.lower())
 
     sys_prompt = f"""
-ROLE
-you are a careful literary annotator. you label emotions, sentiment, and themes for poems.
+ROLE: you are a careful literary annotator of poems.
 
-TASK
-given a poem, choose:
-1) one or more dominant emotions from: {emotion_labels}
-2) one overall sentiment from: {sentiment_labels}
-3) one or more themes from: {theme_labels}
-   - if none of the specific themes clearly apply, use the catch-all theme "others" as the only theme.
+STRICT OUTPUT CONTRACT:
+- output ONLY one JSON object and nothing else (no markdown, no prose).
+- the object must have exactly three keys:
+  - "emotions": a list of 1 to 3 items chosen from {emotion_labels}
+  - "sentiment": one of {sentiment_labels}
+  - "themes": a list with ≥1 items chosen from {theme_labels}; use ["others"] if no specific theme fits.
 
-EVIDENCE BASIS
+SELECTION RULES:
+- emotions: pick 1–3 dominant emotions in order of strength; avoid weak/tenuous ones.
+- sentiment: overall valence of the whole poem.
+- themes: broad motifs clearly supported by the text; if none fit, return ["others"].
+
+EVIDENCE:
 - base labels on the poem text only.
-- if poem text is missing or masked, use the interpretation as fallback and mark themes conservatively.
-
-LABELING RULES
-emotions:
-- choose between 1 and 3 dominant emotions that a typical reader would perceive.
-- list them in order from most dominant to less dominant.
-- do not include emotions that are only weakly present.
-
-sentiment:
-- positive = overall valence uplifting or affirming.
-- negative = overall valence bleak, critical, or painful.
-- neutral = mixed or primarily descriptive without clear valence.
-
-themes:
-- pick broad topical motifs explicitly or strongly implied.
-- return a list with unique items, sorted by your confidence (most confident first).
-- if no specific theme from the list fits, return ["others"] as the only theme.
-
-OUTPUT FORMAT
-return only a single json object with keys:
-- emotions (list of strings, 1 to 3 items)
-- sentiment (string)
-- themes (list of strings, at least one item; may be ["others"] when no specific theme fits)
-no extra keys, no markdown, no commentary.
+- if poem text is missing or masked, you may use the interpretation to decide conservatively.
 """.strip()
 
     user_prompt = f"""
@@ -400,10 +380,11 @@ async def annotate_one(
             messages=messages,
             response_model=PoemAttrs,
             json_schema=schema,
-            max_retries=3,
-            temperature=0.2,
+            max_retries=6,  # ↑ give the schema-off fallback time to work
+            temperature=0.0,
             top_p=1.0,
             reasoning_effort="high",
+            max_tokens=256,
         )
 
         payload = {

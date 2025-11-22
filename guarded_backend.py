@@ -168,12 +168,11 @@ class GuardedBackend:
         return resp.json()
 
     async def guardrail(
-        self,
         *,
         messages: List[Dict[str, Any]],
         response_model: Type[BaseModel],
         json_schema: Optional[Dict[str, Any]] = None,
-        max_retries: int = 3,
+        max_retries: int = 6,
         temperature: float = 0.0,
         top_p: float = 1.0,
         reasoning_effort: str = "high",
@@ -184,10 +183,30 @@ class GuardedBackend:
             guard = Guard.from_pydantic(response_model)
             self.guards[response_model] = guard
 
+        def try_extract_json(raw: Optional[str]) -> Optional[Dict[str, Any]]:
+            if not raw:
+                return None
+            # 1) direct parse
+            try:
+                return json.loads(raw)
+            except Exception:
+                pass
+            # 2) naive slice between first '{' and last '}'
+            s = raw.find("{")
+            e = raw.rfind("}")
+            if s != -1 and e != -1 and e > s:
+                sub = raw[s : e + 1]
+                try:
+                    return json.loads(sub)
+                except Exception:
+                    return None
+            return None
+
         current_messages = list(messages)
         last_error: Optional[Exception] = None
 
         for attempt in range(max_retries):
+            # main call (schema on)
             try:
                 resp = await self.generate(
                     messages=current_messages,
@@ -199,69 +218,100 @@ class GuardedBackend:
                 )
             except Exception as exc:
                 last_error = exc
-                logger.error(f"attempt {attempt+1}/{max_retries} http error: {exc}")
+                # backoff + continue
+                await asyncio.sleep(0.25 * (attempt + 1))
                 continue
 
+            # unpack
             try:
                 choice = (resp.get("choices") or [{}])[0]
                 msg = choice.get("message") or {}
                 content = msg.get("parsed")
-
-                # vllm usually ignores "parsed" and puts everything in "content"
                 raw = msg.get("content")
-
-                if content is None:
-                    if not raw:
-                        raise ValueError("no json content returned")
-                    # raw may have extra text around json, try direct parse first
-                    try:
-                        content = json.loads(raw)
-                    except Exception as exc:
-                        # keep a short preview in logs
-                        preview = raw[:200].replace("\n", " ")
-                        logger.error(
-                            f"attempt {attempt+1}/{max_retries} invalid json: {preview}"
-                        )
-                        raise ValueError("invalid json content") from exc
-
             except Exception as exc:
-                # treat non json responses like a validation error and re-ask
                 last_error = exc
-                hint = (
-                    "your previous reply did not contain valid json that matches the "
-                    "expected schema. respond again with only a single json object, "
-                    "no markdown and no explanation. the json must strictly follow "
-                    "the schema you were given."
-                )
-                current_messages = list(messages) + [
-                    {"role": "system", "content": hint}
-                ]
+                await asyncio.sleep(0.25 * (attempt + 1))
                 continue
+
+            # if we got nothing, immediately **re-call** once with schema OFF + coercive hint
+            if content is None and not raw and json_schema is not None:
+                fallback_messages = list(current_messages) + [
+                    {
+                        "role": "system",
+                        "content": (
+                            "output ONLY one JSON object that matches the schema. "
+                            "no markdown, no prose, no code fences. "
+                            'if unsure, return {"emotions":["sadness"],'
+                            '"sentiment":"neutral","themes":["others"]}.'
+                        ),
+                    }
+                ]
+                try:
+                    resp2 = await self.generate(
+                        messages=fallback_messages,
+                        temperature=temperature,
+                        top_p=top_p,
+                        json_schema=None,  # schema OFF here
+                        reasoning_effort=reasoning_effort,
+                        max_tokens=max_tokens,
+                    )
+                    choice2 = (resp2.get("choices") or [{}])[0]
+                    msg2 = choice2.get("message") or {}
+                    content = msg2.get("parsed")
+                    raw = msg2.get("content")
+                except Exception as exc:
+                    last_error = exc
+                    await asyncio.sleep(0.25 * (attempt + 1))
+                    continue
+
+            # parse content
+            if content is None:
+                # try to parse raw
+                parsed = try_extract_json(raw)
+                if parsed is None:
+                    # re-ask with a short, coercive hint
+                    last_error = ValueError("no json content returned")
+                    current_messages = list(messages) + [
+                        {
+                            "role": "system",
+                            "content": (
+                                "your previous reply did not contain valid json. "
+                                "respond again with only a single json object, no markdown."
+                            ),
+                        }
+                    ]
+                    await asyncio.sleep(0.25 * (attempt + 1))
+                    continue
+                content = parsed
 
             if not isinstance(content, dict):
                 last_error = ValueError("non json object returned")
-                hint = (
-                    "respond again with a single json object that matches the schema. "
-                    "do not return a list or plain text, only one json object."
-                )
                 current_messages = list(messages) + [
-                    {"role": "system", "content": hint}
+                    {
+                        "role": "system",
+                        "content": (
+                            "respond again with a single json object that matches the schema. "
+                            "no arrays, no prose."
+                        ),
+                    }
                 ]
+                await asyncio.sleep(0.25 * (attempt + 1))
                 continue
 
+            # validate via pydantic
             try:
                 validated = response_model.model_validate(content)
                 return validated
             except ValidationError as exc:
                 last_error = exc
-                error_text = str(exc)
                 hint = (
                     "validation failed. fix the json to satisfy the schema exactly. "
-                    f"errors: {error_text}. output json only, no prose."
+                    f"errors: {str(exc)}. output json only."
                 )
                 current_messages = list(messages) + [
                     {"role": "system", "content": hint}
                 ]
+                await asyncio.sleep(0.25 * (attempt + 1))
                 continue
 
         assert last_error is not None

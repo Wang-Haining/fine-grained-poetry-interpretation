@@ -44,8 +44,9 @@ export HTTP_POOL_TIMEOUT="${HTTP_POOL_TIMEOUT:-600}"
 # ---- poetry attrs settings ----
 OUT_DIR="${OUT_DIR:-poem_attrs}"
 SPLIT="${SPLIT:-train}"
-MAX_CONCURRENT="${MAX_CONCURRENT:-32}"
-LIMIT="${LIMIT:-0}"  # 0 means no limit
+MAX_CONCURRENT="${MAX_CONCURRENT:-8}"
+LIMIT="${LIMIT:-0}"
+
 
 CUDA_BIND="/mnt/shared/moduleapps/eb/CUDA/12.3.0"
 export PYTHONUNBUFFERED=1
