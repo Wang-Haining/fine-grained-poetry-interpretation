@@ -1,15 +1,5 @@
 """
 add emotions, sentiment, and themes to poem_interpretation_corpus.
-
-resumability:
-- provenance.jsonl tracks status per row index
-- per-row outputs stored as json in out_dir/rows/{index}.json
-- reruns skip successful rows automatically
-
-labels:
-- emotions: 1–3 dominant emotions from a fixed set
-- sentiment: single overall sentiment
-- themes: one or more canonical themes; if none fit, use the catch-all theme "others"
 """
 
 from __future__ import annotations
@@ -97,7 +87,7 @@ theme_labels = [
     "weather",
     "illness",
     "home",
-    "others",  # catch-all theme when no specific theme fits
+    "others",
 ]
 
 
@@ -113,11 +103,9 @@ class PoemAttrs(BaseModel):
             "joy",
             "surprise",
         ]
-    ] = Field(
-        description="one or more dominant emotion labels from the fixed set, ordered by strength (most dominant first)"
-    )
+    ] = Field(description="1-3 dominant emotions")
     sentiment: Literal["positive", "negative", "neutral"] = Field(
-        description="overall sentiment label"
+        description="overall sentiment"
     )
     themes: List[
         Literal[
@@ -174,79 +162,55 @@ class PoemAttrs(BaseModel):
             "home",
             "others",
         ]
-    ] = Field(
-        default_factory=list,
-        description='one or more theme labels from the fixed set; use "others" if no specific theme fits',
-    )
+    ] = Field(default_factory=lambda: ["others"], description="themes or 'others'")
 
     @field_validator("emotions", mode="before")
     @classmethod
     def validate_emotions(cls, val) -> List[str]:
         if isinstance(val, str):
-            # model might still return a single string, normalize to list
             val = [val]
-
         if not isinstance(val, list):
-            raise ValueError("emotions must be a list or a string")
+            raise ValueError("emotions must be a list")
 
         norm: List[str] = []
         seen: Set[str] = set()
         for item in val:
-            if not isinstance(item, str):
-                raise ValueError("emotions list must contain strings")
-            low = item.strip().lower()
-            if low not in emotion_labels:
-                raise ValueError(f"invalid emotion: {low}")
-            if low not in seen:
+            low = str(item).strip().lower()
+            if low in emotion_labels and low not in seen:
                 norm.append(low)
                 seen.add(low)
 
         if not norm:
-            raise ValueError("emotions list must not be empty")
-
-        # optional cap, keeps things compact
+            raise ValueError("emotions must not be empty")
         return norm[:3]
 
     @field_validator("sentiment", mode="before")
     @classmethod
     def validate_sentiment(cls, val: str) -> str:
-        if not isinstance(val, str):
-            raise ValueError("sentiment must be a string")
-        low = val.strip().lower()
+        low = str(val).strip().lower()
         if low not in sentiment_labels:
-            raise ValueError(f"sentiment must be one of {sentiment_labels}")
+            raise ValueError(f"invalid sentiment: {low}")
         return low
 
     @field_validator("themes", mode="before")
     @classmethod
     def validate_themes(cls, val) -> List[str]:
-        # if model returns nothing or null, fall back to ["others"]
         if val is None:
             return ["others"]
-
         if isinstance(val, str):
             val = [val]
-
         if not isinstance(val, list):
-            raise ValueError("themes must be a list or a string")
+            return ["others"]
 
         norm: List[str] = []
         seen: Set[str] = set()
         for item in val:
-            if not isinstance(item, str):
-                raise ValueError("themes list must contain strings")
-            low = item.strip().lower()
-            if low not in theme_labels:
-                raise ValueError(f"invalid theme: {low}")
-            if low not in seen:
+            low = str(item).strip().lower()
+            if low in theme_labels and low not in seen:
                 norm.append(low)
                 seen.add(low)
 
-        # enforce at least one theme; use catch-all if none were chosen
-        if not norm:
-            return ["others"]
-
-        return norm
+        return norm if norm else ["others"]
 
 
 @dataclass
@@ -263,8 +227,8 @@ def load_provenance(out_dir: Path) -> Dict[int, ProvenanceEntry]:
     if not prov_path.exists():
         return {}
     entries: Dict[int, ProvenanceEntry] = {}
-    with prov_path.open("r") as file:
-        for line in file:
+    with prov_path.open("r") as f:
+        for line in f:
             if not line.strip():
                 continue
             data = json.loads(line)
@@ -275,9 +239,9 @@ def load_provenance(out_dir: Path) -> Dict[int, ProvenanceEntry]:
 def write_provenance(out_dir: Path, entries: Dict[int, ProvenanceEntry]) -> None:
     prov_path = out_dir / "provenance.jsonl"
     tmp_path = out_dir / "provenance.jsonl.tmp"
-    with tmp_path.open("w") as file:
+    with tmp_path.open("w") as f:
         for entry in entries.values():
-            file.write(json.dumps(entry.__dict__) + "\n")
+            f.write(json.dumps(entry.__dict__) + "\n")
     tmp_path.replace(prov_path)
 
 
@@ -305,7 +269,6 @@ def build_messages(row: Dict[str, str]) -> List[Dict[str, str]]:
     poem = (row.get("poem") or "").strip()
     interpretation = (row.get("interpretation") or "").strip()
 
-    # keep context light and predictable
     max_poem_chars = 8000
     max_interp_chars = 8000
     if len(poem) > max_poem_chars:
@@ -315,38 +278,26 @@ def build_messages(row: Dict[str, str]) -> List[Dict[str, str]]:
 
     poem_missing = (not poem) or ("[mask" in poem.lower()) or ("<mask" in poem.lower())
 
-    sys_prompt = f"""
-ROLE: you are a careful literary annotator of poems.
+    sys_prompt = f"""ROLE: literary annotator.
 
-STRICT OUTPUT CONTRACT:
-- output ONLY one JSON object and nothing else (no markdown, no prose).
-- the object must have exactly three keys:
-  - "emotions": a list of 1 to 3 items chosen from {emotion_labels}
-  - "sentiment": one of {sentiment_labels}
-  - "themes": a list with ≥1 items chosen from {theme_labels}; use ["others"] if no specific theme fits.
+OUTPUT: JSON object with exactly three keys:
+- "emotions": list of 1-3 from {emotion_labels}
+- "sentiment": one of {sentiment_labels}
+- "themes": list from {theme_labels} or ["others"]
 
-SELECTION RULES:
-- emotions: pick 1–3 dominant emotions in order of strength; avoid weak/tenuous ones.
-- sentiment: overall valence of the whole poem.
-- themes: broad motifs clearly supported by the text; if none fit, return ["others"].
+RULES:
+- emotions: pick 1-3 dominant emotions, strongest first
+- sentiment: overall valence
+- themes: text-supported themes; use ["others"] if none fit
+- output ONLY the JSON object, no markdown, no explanation"""
 
-EVIDENCE:
-- base labels on the poem text only.
-- if poem text is missing or masked, you may use the interpretation to decide conservatively.
-""".strip()
-
-    user_prompt = f"""
-POEM METADATA
-title: {title or "unknown"}
+    user_prompt = f"""title: {title or "unknown"}
 author: {author or "unknown"}
-source: {row.get("source") or "unknown"}
 
-POEM TEXT
-{poem if poem else "[poem text missing]"}
+POEM:
+{poem if poem else "[missing]"}
 
-INTERPRETATION (fallback only if poem missing)
-{interpretation if poem_missing and interpretation else "[not provided]"}
-""".strip()
+{f"INTERPRETATION (fallback only):\n{interpretation}" if poem_missing and interpretation else ""}"""
 
     return [
         {"role": "system", "content": sys_prompt},
@@ -369,21 +320,14 @@ async def annotate_one(
     mark_status(out_dir, prov, index, "running")
 
     messages = build_messages(row)
-    schema = {
-        "name": "PoemAttrs",
-        "schema": PoemAttrs.model_json_schema(),
-        "strict": True,
-    }
 
     try:
         doc: PoemAttrs = await backend.guardrail(
             messages=messages,
             response_model=PoemAttrs,
-            json_schema=schema,
-            max_retries=6,  # ↑ give the schema-off fallback time to work
+            max_retries=6,
             temperature=0.0,
             top_p=1.0,
-            reasoning_effort="high",
             max_tokens=256,
         )
 
@@ -405,7 +349,6 @@ async def run_all(args: argparse.Namespace) -> None:
     root_out = Path(args.out_dir)
     root_out.mkdir(parents=True, exist_ok=True)
 
-    # load all splits; user can pick subset or "all"
     ds_dict = load_dataset("haining/poem_interpretation_corpus")
     available = list(ds_dict.keys())
     if args.splits.lower() == "all":
@@ -422,7 +365,6 @@ async def run_all(args: argparse.Namespace) -> None:
         read_timeout=float(args.read_timeout),
     )
 
-    # process splits sequentially
     for split in splits:
         out_dir = root_out / split
         rows_dir = out_dir / "rows"
@@ -452,13 +394,12 @@ async def run_all(args: argparse.Namespace) -> None:
                     backend=backend,
                     row=row,
                     index=index,
-                    out_dir=out_dir,  # split-scoped directory
+                    out_dir=out_dir,
                     prov=prov,
                 )
 
         tasks = [asyncio.create_task(bounded(i)) for i in indexes_to_process]
 
-        # progress shows as tasks complete
         for fut in atqdm.as_completed(
             tasks, total=len(tasks), desc=f"annotating:{split}"
         ):
@@ -474,17 +415,14 @@ async def run_all(args: argparse.Namespace) -> None:
 
 
 def build_cli() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(description="add emotions/sentiment/themes to corpus")
-    ap.add_argument(
-        "--base_url", type=str, required=True, help="vllm openai api base url"
-    )
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--base_url", type=str, required=True)
     ap.add_argument("--model", type=str, default="openai/gpt-oss-120b")
     ap.add_argument("--read_timeout", type=float, default=1800.0)
     ap.add_argument("--out_dir", type=str, default="poem_attrs")
-    # NEW: support "all" or comma-separated list like "train,validation,test"
     ap.add_argument("--splits", type=str, default="all")
     ap.add_argument("--max_concurrent", type=int, default=32)
-    ap.add_argument("--limit", type=int, default=0)  # per-split cap; 0 = no cap
+    ap.add_argument("--limit", type=int, default=0)
     return ap
 
 
