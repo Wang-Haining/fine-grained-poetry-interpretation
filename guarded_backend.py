@@ -76,6 +76,7 @@ class GuardedBackend:
         top_p: float = 1.0,
         max_tokens: int = 4096,
         json_mode: bool = True,
+        reasoning_effort: Optional[str] = None,
     ) -> Dict[str, Any]:
         payload: Dict[str, Any] = {
             "model": self.model,
@@ -87,6 +88,9 @@ class GuardedBackend:
 
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
+
+        if reasoning_effort is not None:
+            payload["reasoning_effort"] = reasoning_effort
 
         resp = await self.post_json("/v1/chat/completions", payload)
         resp.raise_for_status()
@@ -133,6 +137,7 @@ class GuardedBackend:
         temperature: float = 0.0,
         top_p: float = 1.0,
         max_tokens: int = 4096,
+        reasoning_effort: Optional[str] = None,
         **kwargs,
     ) -> BaseModel:
         current_messages = list(messages)
@@ -146,6 +151,7 @@ class GuardedBackend:
                     top_p=top_p,
                     max_tokens=max_tokens,
                     json_mode=True,
+                    reasoning_effort=reasoning_effort,
                 )
             except Exception as exc:
                 last_error = exc
@@ -173,7 +179,7 @@ class GuardedBackend:
                     current_messages = [
                         {
                             "role": "user",
-                            "content": 'output this JSON: {"emotions":["sadness"],"sentiment":"neutral","themes":["others"]}',
+                            "content": 'output this JSON: {"emotions":["sadness"],"sentiment":"neutral","themes":[]}',
                         }
                     ]
                 else:

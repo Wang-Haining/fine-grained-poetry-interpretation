@@ -1,13 +1,5 @@
 """
 annotate interpretation corpus with emotion, sentiment, themes.
-
-- reads csv or jsonl
-- async batched annotation via guarded backend
-- pydantic-validated json outputs
-- resumable via provenance.jsonl + per-sample json files
-
-note: no custom names start with "_" per user requirement.
-
 """
 
 from __future__ import annotations
@@ -17,7 +9,7 @@ import asyncio
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional
 
 import pandas as pd
 from pydantic import BaseModel, Field, field_validator
@@ -31,76 +23,18 @@ if not logger.handlers:
     )
 
 
-# ----------------------------
-# label space
-# ----------------------------
 Emotion = Literal[
     "fear", "anger", "trust", "sadness", "disgust", "anticipation", "joy", "surprise"
 ]
 Sentiment = Literal["positive", "negative", "neutral"]
-Theme = Literal[
-    "nature",
-    "body",
-    "death",
-    "love",
-    "existential",
-    "identity",
-    "self",
-    "beauty",
-    "america",
-    "loss",
-    "animals",
-    "history",
-    "memories",
-    "family",
-    "writing",
-    "ancestry",
-    "thought",
-    "landscapes",
-    "war",
-    "time",
-    "religion",
-    "grief",
-    "violence",
-    "aging",
-    "childhood",
-    "desire",
-    "night",
-    "mothers",
-    "language",
-    "birds",
-    "social justice",
-    "music",
-    "flowers",
-    "politics",
-    "hope",
-    "heartache",
-    "fathers",
-    "gender",
-    "environment",
-    "spirituality",
-    "loneliness",
-    "oceans",
-    "dreams",
-    "survival",
-    "cities",
-    "earth",
-    "despair",
-    "anxiety",
-    "weather",
-    "illness",
-    "home",
-]
 
 
 class PoemLabels(BaseModel):
-    emotion: List[Emotion] = Field(
-        description="1-3 dominant emotions from the allowed set"
+    emotion: List[Emotion] = Field(description="1-3 dominant emotions")
+    sentiment: Sentiment = Field(description="overall sentiment")
+    themes: List[str] = Field(
+        default_factory=list, description="0-5 open-vocabulary themes"
     )
-    sentiment: Sentiment = Field(
-        description="overall sentiment: positive, negative, or neutral"
-    )
-    themes: List[Theme] = Field(description="0-5 themes from the allowed set")
 
     @field_validator("emotion")
     @classmethod
@@ -119,9 +53,6 @@ class PoemLabels(BaseModel):
         return v
 
 
-# ----------------------------
-# provenance for resumability
-# ----------------------------
 def load_provenance(save_dir: Path) -> Dict[str, Dict[str, Any]]:
     prov_path = save_dir / "provenance.jsonl"
     if not prov_path.exists():
@@ -161,15 +92,12 @@ def get_samples_to_process(sample_ids: List[str], save_dir: Path) -> List[str]:
     return todo
 
 
-# ----------------------------
-# prompting
-# ----------------------------
 def build_prompts(
     poem: str,
     interpretation: Optional[str],
     *,
     use_interpretation: bool,
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
     allowed_emotions = [
         "fear",
         "anger",
@@ -181,96 +109,33 @@ def build_prompts(
         "surprise",
     ]
     allowed_sentiments = ["positive", "negative", "neutral"]
-    allowed_themes = [
-        "nature",
-        "body",
-        "death",
-        "love",
-        "existential",
-        "identity",
-        "self",
-        "beauty",
-        "america",
-        "loss",
-        "animals",
-        "history",
-        "memories",
-        "family",
-        "writing",
-        "ancestry",
-        "thought",
-        "landscapes",
-        "war",
-        "time",
-        "religion",
-        "grief",
-        "violence",
-        "aging",
-        "childhood",
-        "desire",
-        "night",
-        "mothers",
-        "language",
-        "birds",
-        "social justice",
-        "music",
-        "flowers",
-        "politics",
-        "hope",
-        "heartache",
-        "fathers",
-        "gender",
-        "environment",
-        "spirituality",
-        "loneliness",
-        "oceans",
-        "dreams",
-        "survival",
-        "cities",
-        "earth",
-        "despair",
-        "anxiety",
-        "weather",
-        "illness",
-        "home",
-    ]
 
     sys_prompt = (
-        "ROLE: you are an expert poetry annotator.\n"
-        "GOAL: assign emotion, sentiment, and themes for the poem.\n\n"
-        "STRICT OUTPUT CONTRACT:\n"
-        "- output ONLY one JSON object and nothing else.\n"
-        "- JSON must have exactly three keys: emotion, sentiment, themes.\n"
-        "- do not add extra fields. do not wrap in markdown.\n"
-        "- do not explain your reasoning.\n\n"
-        "LABEL SELECTION RULES:\n"
+        "ROLE: expert poetry annotator.\n"
+        "GOAL: assign emotion, sentiment, and themes.\n\n"
+        "OUTPUT CONTRACT:\n"
+        "- output ONLY one JSON object, no markdown, no explanation.\n"
+        "- JSON keys: emotion, sentiment, themes.\n\n"
+        "RULES:\n"
         "1) EMOTION:\n"
-        f"   - choose 1 to 3 dominant emotions from: {allowed_emotions}\n"
-        "   - dominant = repeatedly evoked in imagery, tone, or speaker stance.\n"
-        "   - if mixed, pick the strongest first.\n"
+        f"   - choose 1-3 from: {allowed_emotions}\n"
+        "   - strongest first\n"
         "2) SENTIMENT:\n"
-        f"   - choose exactly one from: {allowed_sentiments}\n"
-        "   - sentiment reflects overall valence after reading the whole poem.\n"
+        f"   - choose one from: {allowed_sentiments}\n"
         "3) THEMES:\n"
-        f"   - choose 0 to 5 themes from: {allowed_themes}\n"
-        "   - themes must be clearly text-supported, not speculative.\n"
-        "   - if none fit, return an empty list.\n\n"
-        "CONSERVATISM:\n"
-        "- when uncertain, prefer fewer labels.\n"
-        "- never invent labels outside the allowed sets.\n"
+        "   - generate 0-5 theme labels (open vocabulary)\n"
+        "   - use concise, lowercase labels (1-3 words)\n"
+        "   - be specific and descriptive\n"
+        "   - return empty list if no clear themes\n"
     )
 
     user_parts = [
-        "TASK:\n"
-        "Read the poem. Then return a JSON object that follows the contract.\n\n"
-        "POEM:\n"
-        f"{poem.strip()}",
+        "TASK: Read the poem and return the JSON object.\n\n" f"POEM:\n{poem.strip()}",
     ]
 
     if use_interpretation and interpretation:
         user_parts += [
-            "\nOPTIONAL CONTEXT (model interpretation). "
-            "Use only if it helps disambiguate; the poem remains primary evidence:\n"
+            "\nOPTIONAL CONTEXT (model interpretation, use if helpful):\n"
             f"{interpretation.strip()}",
         ]
 
@@ -292,24 +157,17 @@ async def annotate_one(
         poem, interpretation, use_interpretation=use_interpretation
     )
 
-    schema = {
-        "name": "PoemLabels",
-        "schema": PoemLabels.model_json_schema(),
-        "strict": True,
-    }
-
     labels: PoemLabels = await backend.guardrail(
         messages=[
             {"role": "system", "content": sys_prompt},
             {"role": "user", "content": user_prompt},
         ],
         response_model=PoemLabels,
-        json_schema=schema,
-        max_retries=3,
+        max_retries=6,
         temperature=temperature,
         top_p=1.0,
-        max_tokens=256,
-        reasoning_effort="high",
+        max_tokens=4096,
+        reasoning_effort="medium",
     )
 
     out_path = save_dir / "samples" / f"{sample_id}.json"
@@ -317,9 +175,6 @@ async def annotate_one(
     return labels
 
 
-# ----------------------------
-# io
-# ----------------------------
 def read_corpus(path: Path) -> pd.DataFrame:
     if path.suffix.lower() in {".jsonl", ".json"}:
         rows = []
@@ -341,9 +196,6 @@ def infer_sample_ids(df: pd.DataFrame, id_col: Optional[str]) -> List[str]:
     return [f"sample_{i}" for i in range(len(df))]
 
 
-# ----------------------------
-# main async
-# ----------------------------
 async def main_async(args: argparse.Namespace) -> None:
     input_path = Path(args.input_path)
     save_dir = Path(args.save_dir)
@@ -406,7 +258,6 @@ async def main_async(args: argparse.Namespace) -> None:
 
     await backend.close()
 
-    # merge any existing sample files (resumable final export)
     emotions, sentiments, themes = [], [], []
     for sid in sample_ids:
         sp = save_dir / "samples" / f"{sid}.json"

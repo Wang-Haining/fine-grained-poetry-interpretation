@@ -35,61 +35,6 @@ emotion_labels = [
 
 sentiment_labels = ["positive", "negative", "neutral"]
 
-theme_labels = [
-    "nature",
-    "body",
-    "death",
-    "love",
-    "existential",
-    "identity",
-    "self",
-    "beauty",
-    "america",
-    "loss",
-    "animals",
-    "history",
-    "memories",
-    "family",
-    "writing",
-    "ancestry",
-    "thought",
-    "landscapes",
-    "war",
-    "time",
-    "religion",
-    "grief",
-    "violence",
-    "aging",
-    "childhood",
-    "desire",
-    "night",
-    "mothers",
-    "language",
-    "birds",
-    "social justice",
-    "music",
-    "flowers",
-    "politics",
-    "hope",
-    "heartache",
-    "fathers",
-    "gender",
-    "environment",
-    "spirituality",
-    "loneliness",
-    "oceans",
-    "dreams",
-    "survival",
-    "cities",
-    "earth",
-    "despair",
-    "anxiety",
-    "weather",
-    "illness",
-    "home",
-    "others",
-]
-
 
 class PoemAttrs(BaseModel):
     emotions: List[
@@ -107,62 +52,10 @@ class PoemAttrs(BaseModel):
     sentiment: Literal["positive", "negative", "neutral"] = Field(
         description="overall sentiment"
     )
-    themes: List[
-        Literal[
-            "nature",
-            "body",
-            "death",
-            "love",
-            "existential",
-            "identity",
-            "self",
-            "beauty",
-            "america",
-            "loss",
-            "animals",
-            "history",
-            "memories",
-            "family",
-            "writing",
-            "ancestry",
-            "thought",
-            "landscapes",
-            "war",
-            "time",
-            "religion",
-            "grief",
-            "violence",
-            "aging",
-            "childhood",
-            "desire",
-            "night",
-            "mothers",
-            "language",
-            "birds",
-            "social justice",
-            "music",
-            "flowers",
-            "politics",
-            "hope",
-            "heartache",
-            "fathers",
-            "gender",
-            "environment",
-            "spirituality",
-            "loneliness",
-            "oceans",
-            "dreams",
-            "survival",
-            "cities",
-            "earth",
-            "despair",
-            "anxiety",
-            "weather",
-            "illness",
-            "home",
-            "others",
-        ]
-    ] = Field(default_factory=lambda: ["others"], description="themes or 'others'")
+    themes: List[str] = Field(
+        default_factory=list,
+        description="open-vocabulary themes (0-5 themes)",
+    )
 
     @field_validator("emotions", mode="before")
     @classmethod
@@ -196,21 +89,21 @@ class PoemAttrs(BaseModel):
     @classmethod
     def validate_themes(cls, val) -> List[str]:
         if val is None:
-            return ["others"]
+            return []
         if isinstance(val, str):
             val = [val]
         if not isinstance(val, list):
-            return ["others"]
+            return []
 
         norm: List[str] = []
         seen: Set[str] = set()
         for item in val:
-            low = str(item).strip().lower()
-            if low in theme_labels and low not in seen:
-                norm.append(low)
-                seen.add(low)
+            clean = str(item).strip().lower()
+            if clean and clean not in seen:
+                norm.append(clean)
+                seen.add(clean)
 
-        return norm if norm else ["others"]
+        return norm[:5]
 
 
 @dataclass
@@ -283,12 +176,15 @@ def build_messages(row: Dict[str, str]) -> List[Dict[str, str]]:
 OUTPUT: JSON object with exactly three keys:
 - "emotions": list of 1-3 from {emotion_labels}
 - "sentiment": one of {sentiment_labels}
-- "themes": list from {theme_labels} or ["others"]
+- "themes": list of 0-5 theme strings (open vocabulary)
 
 RULES:
 - emotions: pick 1-3 dominant emotions, strongest first
 - sentiment: overall valence
-- themes: text-supported themes; use ["others"] if none fit
+- themes: generate your own theme labels that capture the poem's content
+  - use concise, lowercase labels (1-3 words each)
+  - be specific and descriptive
+  - return empty list if no clear themes
 - output ONLY the JSON object, no markdown, no explanation"""
 
     user_prompt = f"""title: {title or "unknown"}
@@ -329,6 +225,7 @@ async def annotate_one(
             temperature=0.0,
             top_p=1.0,
             max_tokens=4096,
+            reasoning_effort="medium",
         )
 
         payload = {
