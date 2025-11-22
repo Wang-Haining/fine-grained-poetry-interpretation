@@ -168,6 +168,7 @@ class GuardedBackend:
         return resp.json()
 
     async def guardrail(
+        self,
         *,
         messages: List[Dict[str, Any]],
         response_model: Type[BaseModel],
