@@ -1,11 +1,15 @@
 """
-add emotion, sentiment, and themes to poem_interpretation_corpus.
+add emotions, sentiment, and themes to poem_interpretation_corpus.
 
 resumability:
 - provenance.jsonl tracks status per row index
 - per-row outputs stored as json in out_dir/rows/{index}.json
 - reruns skip successful rows automatically
 
+labels:
+- emotions: 1–3 dominant emotions from a fixed set
+- sentiment: single overall sentiment
+- themes: one or more canonical themes; if none fit, use the catch-all theme "others"
 """
 
 from __future__ import annotations
@@ -93,20 +97,25 @@ theme_labels = [
     "weather",
     "illness",
     "home",
+    "others",  # catch-all theme when no specific theme fits
 ]
 
 
 class PoemAttrs(BaseModel):
-    emotion: Literal[
-        "fear",
-        "anger",
-        "trust",
-        "sadness",
-        "disgust",
-        "anticipation",
-        "joy",
-        "surprise",
-    ] = Field(description="primary emotion label from the fixed set")
+    emotions: List[
+        Literal[
+            "fear",
+            "anger",
+            "trust",
+            "sadness",
+            "disgust",
+            "anticipation",
+            "joy",
+            "surprise",
+        ]
+    ] = Field(
+        description="one or more dominant emotion labels from the fixed set, ordered by strength (most dominant first)"
+    )
     sentiment: Literal["positive", "negative", "neutral"] = Field(
         description="overall sentiment label"
     )
@@ -163,18 +172,40 @@ class PoemAttrs(BaseModel):
             "weather",
             "illness",
             "home",
+            "others",
         ]
-    ] = Field(default_factory=list, description="0+ theme labels from the fixed set")
+    ] = Field(
+        default_factory=list,
+        description='one or more theme labels from the fixed set; use "others" if no specific theme fits',
+    )
 
-    @field_validator("emotion", mode="before")
+    @field_validator("emotions", mode="before")
     @classmethod
-    def validate_emotion(cls, val: str) -> str:
-        if not isinstance(val, str):
-            raise ValueError("emotion must be a string")
-        low = val.strip().lower()
-        if low not in emotion_labels:
-            raise ValueError(f"emotion must be one of {emotion_labels}")
-        return low
+    def validate_emotions(cls, val) -> List[str]:
+        if isinstance(val, str):
+            # model might still return a single string, normalize to list
+            val = [val]
+
+        if not isinstance(val, list):
+            raise ValueError("emotions must be a list or a string")
+
+        norm: List[str] = []
+        seen: Set[str] = set()
+        for item in val:
+            if not isinstance(item, str):
+                raise ValueError("emotions list must contain strings")
+            low = item.strip().lower()
+            if low not in emotion_labels:
+                raise ValueError(f"invalid emotion: {low}")
+            if low not in seen:
+                norm.append(low)
+                seen.add(low)
+
+        if not norm:
+            raise ValueError("emotions list must not be empty")
+
+        # optional cap, keeps things compact
+        return norm[:3]
 
     @field_validator("sentiment", mode="before")
     @classmethod
@@ -189,10 +220,16 @@ class PoemAttrs(BaseModel):
     @field_validator("themes", mode="before")
     @classmethod
     def validate_themes(cls, val) -> List[str]:
+        # if model returns nothing or null, fall back to ["others"]
         if val is None:
-            return []
+            return ["others"]
+
+        if isinstance(val, str):
+            val = [val]
+
         if not isinstance(val, list):
-            raise ValueError("themes must be a list")
+            raise ValueError("themes must be a list or a string")
+
         norm: List[str] = []
         seen: Set[str] = set()
         for item in val:
@@ -204,6 +241,11 @@ class PoemAttrs(BaseModel):
             if low not in seen:
                 norm.append(low)
                 seen.add(low)
+
+        # enforce at least one theme; use catch-all if none were chosen
+        if not norm:
+            return ["others"]
+
         return norm
 
 
@@ -262,8 +304,8 @@ def build_messages(row: Dict[str, str]) -> List[Dict[str, str]]:
     author = (row.get("author") or "").strip()
     poem = (row.get("poem") or "").strip()
     interpretation = (row.get("interpretation") or "").strip()
-    # hard cap lengths to keep context light
 
+    # hard cap lengths to keep context light
     max_poem_chars = 8000
     max_interp_chars = 8000
     if len(poem) > max_poem_chars:
@@ -276,22 +318,24 @@ def build_messages(row: Dict[str, str]) -> List[Dict[str, str]]:
 
     sys_prompt = f"""
 ROLE
-you are a careful literary annotator. you label emotion, sentiment, and themes for poems.
+you are a careful literary annotator. you label emotions, sentiment, and themes for poems.
 
 TASK
 given a poem, choose:
-1) one primary emotion from: {emotion_labels}
+1) one or more dominant emotions from: {emotion_labels}
 2) one overall sentiment from: {sentiment_labels}
-3) zero or more themes from: {theme_labels}
+3) one or more themes from: {theme_labels}
+   - if none of the specific themes clearly apply, use the catch-all theme "others" as the only theme.
 
 EVIDENCE BASIS
 - base labels on the poem text only.
 - if poem text is missing or masked, use the interpretation as fallback and mark themes conservatively.
 
 LABELING RULES
-emotion:
-- pick the dominant affective tone a typical reader would perceive.
-- do not return multiple emotions.
+emotions:
+- choose between 1 and 3 dominant emotions that a typical reader would perceive.
+- list them in order from most dominant to less dominant.
+- do not include emotions that are only weakly present.
 
 sentiment:
 - positive = overall valence uplifting or affirming.
@@ -301,13 +345,13 @@ sentiment:
 themes:
 - pick broad topical motifs explicitly or strongly implied.
 - return a list with unique items, sorted by your confidence (most confident first).
-- if unsure about a theme, omit it.
+- if no specific theme from the list fits, return ["others"] as the only theme.
 
 OUTPUT FORMAT
 return only a single json object with keys:
-- emotion (string)
+- emotions (list of strings, 1 to 3 items)
 - sentiment (string)
-- themes (list of strings)
+- themes (list of strings, at least one item; may be ["others"] when no specific theme fits)
 no extra keys, no markdown, no commentary.
 """.strip()
 
@@ -360,12 +404,12 @@ async def annotate_one(
             temperature=0.2,
             top_p=1.0,
             reasoning_effort="high",
-            max_tokens=256,
         )
 
         payload = {
             "index": index,
-            "emotion": doc.emotion,
+            "emotions": doc.emotions,
+            "primary_emotion": doc.emotions[0] if doc.emotions else None,
             "sentiment": doc.sentiment,
             "themes": doc.themes,
         }
@@ -406,13 +450,13 @@ async def run_all(args: argparse.Namespace) -> None:
 
     semaphore = asyncio.Semaphore(int(args.max_concurrent))
 
-    async def bounded(index: int) -> None:
+    async def bounded(idx: int) -> None:
         async with semaphore:
-            row = dict(ds[index])
+            row = dict(ds[idx])
             await annotate_one(
                 backend=backend,
                 row=row,
-                index=index,
+                index=idx,
                 out_dir=out_dir,
                 prov=prov,
             )
@@ -434,7 +478,7 @@ async def run_all(args: argparse.Namespace) -> None:
 
 
 def build_cli() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(description="add emotion/sentiment/themes to corpus")
+    ap = argparse.ArgumentParser(description="add emotions/sentiment/themes to corpus")
     ap.add_argument(
         "--base_url", type=str, required=True, help="vllm openai api base url"
     )
