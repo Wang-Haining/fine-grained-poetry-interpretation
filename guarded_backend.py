@@ -4,7 +4,7 @@ async guarded backend for an openai-compatible vllm server.
 features:
 - async httpx client with keepalive
 - optional structured output via json schema
-- pydantic validation plus hinted retry using guardrails
+- pydantic validation with guided retries
 """
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ import json
 import logging
 import os
 import random
-import sys
 from typing import Any, Dict, List, Optional, Type
 
 import httpx
@@ -145,6 +144,7 @@ class GuardedBackend:
         resp = await self.post_json("/v1/chat/completions", payload)
 
         if resp.status_code == 500 and json_schema is not None:
+            # simple fallback: relax strict, then plain json_object
             try_payload = dict(payload)
             schema_rf = dict(try_payload.get("response_format", {}))
             schema_block = dict(schema_rf.get("json_schema", {}))
@@ -203,25 +203,50 @@ class GuardedBackend:
                 continue
 
             try:
-                choices = resp.get("choices") or []
-                choice = choices[0] if choices else {}
+                choice = (resp.get("choices") or [{}])[0]
                 msg = choice.get("message") or {}
                 content = msg.get("parsed")
 
+                # vllm usually ignores "parsed" and puts everything in "content"
+                raw = msg.get("content")
+
                 if content is None:
-                    raw = msg.get("content")
-                    if isinstance(raw, str):
-                        content = json.loads(raw)
-                    elif isinstance(raw, dict):
-                        content = raw
-                    else:
+                    if not raw:
                         raise ValueError("no json content returned")
+                    # raw may have extra text around json, try direct parse first
+                    try:
+                        content = json.loads(raw)
+                    except Exception as exc:
+                        # keep a short preview in logs
+                        preview = raw[:200].replace("\n", " ")
+                        logger.error(
+                            f"attempt {attempt+1}/{max_retries} invalid json: {preview}"
+                        )
+                        raise ValueError("invalid json content") from exc
+
             except Exception as exc:
+                # treat non json responses like a validation error and re-ask
                 last_error = exc
+                hint = (
+                    "your previous reply did not contain valid json that matches the "
+                    "expected schema. respond again with only a single json object, "
+                    "no markdown and no explanation. the json must strictly follow "
+                    "the schema you were given."
+                )
+                current_messages = list(messages) + [
+                    {"role": "system", "content": hint}
+                ]
                 continue
 
             if not isinstance(content, dict):
-                last_error = ValueError("non-json content returned")
+                last_error = ValueError("non json object returned")
+                hint = (
+                    "respond again with a single json object that matches the schema. "
+                    "do not return a list or plain text, only one json object."
+                )
+                current_messages = list(messages) + [
+                    {"role": "system", "content": hint}
+                ]
                 continue
 
             try:
@@ -230,10 +255,9 @@ class GuardedBackend:
             except ValidationError as exc:
                 last_error = exc
                 error_text = str(exc)
-
                 hint = (
                     "validation failed. fix the json to satisfy the schema exactly. "
-                    f"errors: {error_text}. output json only."
+                    f"errors: {error_text}. output json only, no prose."
                 )
                 current_messages = list(messages) + [
                     {"role": "system", "content": hint}
