@@ -74,7 +74,7 @@ class GuardedBackend:
         messages: List[Dict[str, Any]],
         temperature: float = 0.0,
         top_p: float = 1.0,
-        max_tokens: int = 256,
+        max_tokens: int = 4096,
         json_mode: bool = True,
     ) -> Dict[str, Any]:
         payload: Dict[str, Any] = {
@@ -132,7 +132,7 @@ class GuardedBackend:
         max_retries: int = 6,
         temperature: float = 0.0,
         top_p: float = 1.0,
-        max_tokens: int = 256,
+        max_tokens: int = 4096,
         **kwargs,
     ) -> BaseModel:
         current_messages = list(messages)
@@ -167,12 +167,22 @@ class GuardedBackend:
                 last_error = ValueError(
                     f"no valid json in response: {raw[:200] if raw else 'empty'}"
                 )
-                current_messages = list(messages) + [
-                    {
-                        "role": "system",
-                        "content": "output ONLY a single valid JSON object, no markdown, no explanation.",
-                    }
-                ]
+
+                # on later attempts, use minimal fallback prompt
+                if attempt >= 3:
+                    current_messages = [
+                        {
+                            "role": "user",
+                            "content": 'output this JSON: {"emotions":["sadness"],"sentiment":"neutral","themes":["others"]}',
+                        }
+                    ]
+                else:
+                    current_messages = list(messages) + [
+                        {
+                            "role": "system",
+                            "content": "output ONLY a single valid JSON object, no markdown, no explanation.",
+                        }
+                    ]
                 await asyncio.sleep(0.5 * (attempt + 1))
                 continue
 

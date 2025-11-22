@@ -328,7 +328,7 @@ async def annotate_one(
             max_retries=6,
             temperature=0.0,
             top_p=1.0,
-            max_tokens=256,
+            max_tokens=4096,
         )
 
         payload = {
