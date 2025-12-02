@@ -3,6 +3,7 @@ annotate interpretation corpus with emotion, sentiment, themes.
 """
 
 from __future__ import annotations
+import re
 
 import argparse
 import asyncio
@@ -27,14 +28,40 @@ Emotion = Literal[
     "fear", "anger", "trust", "sadness", "disgust", "anticipation", "joy", "surprise"
 ]
 Sentiment = Literal["positive", "negative", "neutral"]
+# fixed 50 themes (lowercase) – used to derive themes_50 from open-vocab themes
+THEMES_50 = [
+    "nature","body","death","love","existential","identity","self","beauty","america",
+    "loss","animals","history","memories","family","writing","ancestry","thought",
+    "landscapes","war","time","religion","grief","violence","aging","childhood","desire",
+    "night","mothers","language","birds","social justice","music","flowers","politics",
+    "hope","heartache","fathers","gender","environment","spirituality","loneliness",
+    "oceans","dreams","survival","cities","earth","despair","anxiety","weather","illness",
+    "home",
+]
+THEMES_50_SET = set(THEMES_50)
 
 
 class PoemLabels(BaseModel):
     emotion: List[Emotion] = Field(description="1-3 dominant emotions")
     sentiment: Sentiment = Field(description="overall sentiment")
     themes: List[str] = Field(
-        default_factory=list, description="0-5 open-vocabulary themes"
+        default_factory=list, description="0-5 open-vocabulary themes (no 'others')"
     )
+
+    # normalize → lowercase list before Literal validation
+    @field_validator("emotion", mode="before")
+    @classmethod
+    def normalize_emotion(cls, v):
+        if isinstance(v, str):
+            v = [v]
+        if not isinstance(v, list):
+            raise ValueError("emotion must be a list or a string")
+        norm = []
+        for item in v:
+            s = str(item).strip().lower()
+            if s:
+                norm.append(s)
+        return norm
 
     @field_validator("emotion")
     @classmethod
@@ -45,12 +72,40 @@ class PoemLabels(BaseModel):
             raise ValueError("emotion must contain at most 3 labels")
         return v
 
+    # normalize, dedupe, drop "others"/"other", cap length and words, max 5
+    @field_validator("themes", mode="before")
+    @classmethod
+    def normalize_themes(cls, v):
+        if v is None:
+            return []
+        if isinstance(v, str):
+            v = [v]
+        if not isinstance(v, list):
+            return []
+
+        out, seen = [], set()
+        for item in v:
+            s = re.sub(r"\s+", " ", str(item).strip().lower())
+            if not s:
+                continue
+            if s in {"others", "other"}:
+                continue  # forbid placeholders
+            # keep themes concise: at most 3 words; trim if longer
+            words = s.split()
+            if len(words) > 3:
+                s = " ".join(words[:3])
+            if s not in seen:
+                out.append(s)
+                seen.add(s)
+        return out[:5]
+
     @field_validator("themes")
     @classmethod
     def max_themes(cls, v: List[str]) -> List[str]:
         if len(v) > 5:
             raise ValueError("themes must contain at most 5 labels")
         return v
+
 
 
 def load_provenance(save_dir: Path) -> Dict[str, Dict[str, Any]]:
@@ -99,14 +154,7 @@ def build_prompts(
     use_interpretation: bool,
 ) -> tuple[str, str]:
     allowed_emotions = [
-        "fear",
-        "anger",
-        "trust",
-        "sadness",
-        "disgust",
-        "anticipation",
-        "joy",
-        "surprise",
+        "fear", "anger", "trust", "sadness", "disgust", "anticipation", "joy", "surprise"
     ]
     allowed_sentiments = ["positive", "negative", "neutral"]
 
@@ -115,32 +163,33 @@ def build_prompts(
         "GOAL: assign emotion, sentiment, and themes.\n\n"
         "OUTPUT CONTRACT:\n"
         "- output ONLY one JSON object, no markdown, no explanation.\n"
-        "- JSON keys: emotion, sentiment, themes.\n\n"
+        '- the JSON must have exactly these keys: "emotion", "sentiment", "themes".\n\n'
         "RULES:\n"
         "1) EMOTION:\n"
-        f"   - choose 1-3 from: {allowed_emotions}\n"
-        "   - strongest first\n"
+        f"   - choose 1–3 dominant emotions from: {allowed_emotions}\n"
+        "   - strongest first.\n"
         "2) SENTIMENT:\n"
-        f"   - choose one from: {allowed_sentiments}\n"
-        "3) THEMES:\n"
-        "   - generate 0-5 theme labels (open vocabulary)\n"
-        "   - use concise, lowercase labels (1-3 words)\n"
-        "   - be specific and descriptive\n"
-        "   - return empty list if no clear themes\n"
+        f"   - choose exactly one from: {allowed_sentiments}\n"
+        "3) THEMES (open vocabulary):\n"
+        "   - generate 0–5 concise, lowercase labels (1–3 words each).\n"
+        "   - be specific and text-grounded.\n"
+        "   - do NOT use placeholders like 'others' or 'other'.\n"
+        "   - if no clear themes, return an empty list [].\n"
     )
 
     user_parts = [
-        "TASK: Read the poem and return the JSON object.\n\n" f"POEM:\n{poem.strip()}",
+        "TASK: Read the poem and return the JSON object.\n\n"
+        f"POEM:\n{poem.strip()}",
     ]
-
     if use_interpretation and interpretation:
         user_parts += [
-            "\nOPTIONAL CONTEXT (model interpretation, use if helpful):\n"
+            "\nOPTIONAL CONTEXT (model interpretation; poem remains primary evidence):\n"
             f"{interpretation.strip()}",
         ]
 
     user_prompt = "\n".join(user_parts).strip()
     return sys_prompt, user_prompt
+
 
 
 async def annotate_one(
@@ -258,26 +307,32 @@ async def main_async(args: argparse.Namespace) -> None:
 
     await backend.close()
 
-    emotions, sentiments, themes = [], [], []
+    # merge any existing sample files (resumable final export)
+    emotions, sentiments, themes_open, themes_fixed50 = [], [], [], []
     for sid in sample_ids:
         sp = save_dir / "samples" / f"{sid}.json"
         if sp.exists():
             obj = PoemLabels.model_validate_json(sp.read_text())
             emotions.append(";".join(obj.emotion))
             sentiments.append(obj.sentiment)
-            themes.append(";".join(obj.themes))
+            open_list = [t.strip().lower() for t in obj.themes]
+            themes_open.append(";".join(open_list))
+            themes_fixed50.append(";".join([t for t in open_list if t in THEMES_50_SET]))
         else:
             emotions.append(None)
             sentiments.append(None)
-            themes.append(None)
+            themes_open.append(None)
+            themes_fixed50.append(None)
 
     df["emotion"] = emotions
     df["sentiment"] = sentiments
-    df["themes"] = themes
+    df["themes"] = themes_open          # open vocabulary
+    df["themes_50"] = themes_fixed50    # restricted to the fixed 50 only
 
     out_path = save_dir / args.output_name
     df.to_csv(out_path, index=False)
     logger.info(f"wrote annotated corpus to {out_path}")
+
 
 
 def build_cli() -> argparse.ArgumentParser:

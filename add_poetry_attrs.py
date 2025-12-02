@@ -35,6 +35,17 @@ emotion_labels = [
 
 sentiment_labels = ["positive", "negative", "neutral"]
 
+# fixed 50 themes (lowercase) – used to derive themes_50 from open-vocab themes
+themes_50 = [
+    "nature","body","death","love","existential","identity","self","beauty","america",
+    "loss","animals","history","memories","family","writing","ancestry","thought",
+    "landscapes","war","time","religion","grief","violence","aging","childhood","desire",
+    "night","mothers","language","birds","social justice","music","flowers","politics",
+    "hope","heartache","fathers","gender","environment","spirituality","loneliness",
+    "oceans","dreams","survival","cities","earth","despair","anxiety","weather","illness",
+    "home",
+]
+themes_50_set = set(themes_50)
 
 class PoemAttrs(BaseModel):
     emotions: List[
@@ -228,18 +239,24 @@ async def annotate_one(
             reasoning_effort="medium",
         )
 
+        # keep open-vocab themes as-is, and derive themes_50 by intersecting with the fixed list
+        open_themes = doc.themes
+        only_50 = [t for t in open_themes if t in themes_50_set]
+
         payload = {
             "index": index,
             "emotions": doc.emotions,
             "primary_emotion": doc.emotions[0] if doc.emotions else None,
             "sentiment": doc.sentiment,
-            "themes": doc.themes,
+            "themes": open_themes,     # open vocabulary
+            "themes_50": only_50,      # restricted to the fixed 50
         }
         out_path.write_text(json.dumps(payload, ensure_ascii=False))
         mark_status(out_dir, prov, index, "success", output_path=str(out_path))
     except Exception as exc:
         mark_status(out_dir, prov, index, "failed", error=str(exc))
         raise
+
 
 
 async def run_all(args: argparse.Namespace) -> None:
