@@ -4,8 +4,43 @@ import hashlib
 import json
 from pathlib import Path
 
+# --- add near the top ---
 import pandas as pd
 from datasets import load_dataset
+
+
+def _normalize_for_poem_id_merge(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+
+    # flatten multiindex columns if any
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = ["__".join(map(str, t)).strip() for t in df.columns.to_list()]
+
+    # normalize names
+    df.columns = [str(c).strip() for c in df.columns]
+
+    # if poem_id appears in the index, bring it back as a column
+    index_names = [n for n in getattr(df.index, "names", []) if n is not None]
+    if df.index.name == "poem_id" or ("poem_id" in index_names):
+        df = df.reset_index()
+
+    # coalesce any poem_id-like duplicates (e.g., poem_id, poem_id.1)
+    poemish = [c for c in df.columns if c.strip().lower() == "poem_id"]
+    if len(poemish) > 1:
+        base = df[poemish].bfill(axis=1).iloc[:, 0]
+        keep = poemish[-1]
+        drop = [c for c in poemish if c != keep]
+        df = df.drop(columns=drop)
+        df[keep] = base
+
+    # drop duplicate column labels (last wins)
+    df = df.loc[:, ~pd.Index(df.columns).duplicated(keep="last")]
+
+    # final sanity: exactly one poem_id column
+    assert (
+        pd.Index(df.columns) == "poem_id"
+    ).sum() == 1, "poem_id label still ambiguous"
+    return df
 
 
 def poem_id(author: str, title: str, poem: str) -> str:
@@ -91,6 +126,8 @@ def main():
     attrs = attrs[attr_cols].drop_duplicates("poem_id")
 
     # merge
+    catalog = _normalize_for_poem_id_merge(catalog)
+    attrs = _normalize_for_poem_id_merge(attrs)
     merged = catalog.merge(attrs, on="poem_id", how="left")
     merged.to_parquet(args.merged_out, index=False)
 
