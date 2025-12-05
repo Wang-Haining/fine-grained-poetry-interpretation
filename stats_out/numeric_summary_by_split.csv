@@ -1,0 +1,4 @@
+split,column,count,mean,std,min,p5,median,p95,max
+test,index,0.0,,,,,,,
+train,index,0.0,,,,,,,
+validation,index,0.0,,,,,,,

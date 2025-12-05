@@ -1,0 +1,14 @@
+column,dtype,non_null,null,pct_non_null
+split,object,51356,0,100.0
+poem_id,object,51356,0,100.0
+author,object,51356,0,100.0
+title,object,51356,0,100.0
+poem,object,51356,0,100.0
+interpretation,object,51356,0,100.0
+source,object,51356,0,100.0
+index,float64,0,51356,0.0
+emotions,object,0,51356,0.0
+primary_emotion,object,0,51356,0.0
+sentiment,object,0,51356,0.0
+themes,object,0,51356,0.0
+themes_50,object,0,51356,0.0

@@ -1,0 +1,4 @@
+split,count,pct
+train,46220,90.0
+validation,2568,5.0
+test,2568,5.0
