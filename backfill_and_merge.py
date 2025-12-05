@@ -42,6 +42,14 @@ def poem_id(author: str, title: str, poem: str) -> str:
     return hashlib.sha1(key.encode()).hexdigest()[:16]
 
 
+def _force_id_str(df: pd.DataFrame, cols: Iterable[str]) -> pd.DataFrame:
+    df = df.copy()
+    for c in cols:
+        if c in df.columns:
+            df[c] = df[c].astype(str).str.strip().str.lower()
+    return df
+
+
 def normalize_for_poem_id_merge(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
@@ -72,6 +80,10 @@ def normalize_for_poem_id_merge(df: pd.DataFrame) -> pd.DataFrame:
     # final sanity: exactly one poem_id column
     if (pd.Index(df.columns) == "poem_id").sum() != 1:
         raise AssertionError("poem_id label still ambiguous")
+
+    # ensure id is normalized string
+    df = _force_id_str(df, ["poem_id"])
+
     return df
 
 
@@ -88,6 +100,9 @@ def read_attrs(path: Path) -> pd.DataFrame:
 
     # snake all column names now (handles camelCase, spaces, etc.)
     df.columns = [_snake(c) for c in df.columns]
+    # ensure any id-like columns are strings now (before any other ops)
+    df = _force_id_str(df, ["poem_id", "poem_id_file", "poem_id_json"])
+
     return df
 
 
@@ -165,12 +180,13 @@ def main():
     catalog = pd.DataFrame(rows)
     catalog.columns = [_snake(c) for c in catalog.columns]
     catalog = add_key_columns(catalog, "title", "author")
+    # normalize/force poem_id string/lower
     catalog = normalize_for_poem_id_merge(catalog)
 
     # ---------- read attrs ----------
     attrs = read_attrs(Path(args.attrs_path))
 
-    # honor provided id column (e.g., poem_id_file), keep alternates for debug
+    # prefer explicit attrs id if provided (e.g., poem_id_file)
     have_pid = "poem_id" in attrs.columns
     if args.attrs_id_col in attrs.columns and args.attrs_id_col != "poem_id":
         attrs = attrs.rename(columns={args.attrs_id_col: "poem_id"})
@@ -184,7 +200,7 @@ def main():
         ]
         have_pid = True
 
-    # normalize & canonicalize names, add join keys
+    # normalize ids on attrs if we have them
     attrs = normalize_for_poem_id_merge(attrs) if have_pid else attrs
     attrs = add_key_columns(attrs, "title", "author")
 
@@ -205,18 +221,32 @@ def main():
     idish = {"poem_id", "poem_id_json", "poem_id_file"}
 
     candidate = [c for c in attrs.columns if c not in meta_drop]
-    attrs = stringify_nested_objects(attrs, candidates=candidate)
+    # do not stringify id columns
+    candidate_no_ids = [c for c in candidate if c not in idish]
+    attrs = stringify_nested_objects(attrs, candidates=candidate_no_ids)
 
     # actual value columns = non-id, non-meta that have at least one non-null
-    value_cols = [c for c in candidate if c not in idish]
-    value_cols = [c for c in value_cols if attrs[c].notna().any()]
+    value_cols = [c for c in candidate_no_ids if attrs[c].notna().any()]
+
+    # ---------- sanity: show id intersection ----------
+    inter = (
+        len(pd.Index(catalog["poem_id"]).intersection(pd.Index(attrs["poem_id"])))
+        if have_pid
+        else 0
+    )
+    if have_pid:
+        print(f"id intersection with catalog: {inter}/{len(catalog)}")
 
     # ---------- primary: id-based merge ----------
     merged = catalog.copy()
     matched_by_id = pd.Series(False, index=merged.index)
     if have_pid and value_cols:
         right = attrs[["poem_id"] + value_cols].drop_duplicates("poem_id")
-        merged = merged.merge(right, on="poem_id", how="left")
+        # force id strings (defensive)
+        right = _force_id_str(right, ["poem_id"])
+        merged = _force_id_str(merged, ["poem_id"]).merge(
+            right, on="poem_id", how="left"
+        )
         matched_by_id = merged[value_cols].notna().any(axis=1)
 
     # ---------- fallback: exact author_key + title_key ----------
@@ -247,7 +277,7 @@ def main():
     print(f"total rows: {len(merged)}")
     print(f"with attrs: {int(has_any_value.sum())}")
     print(f"coverage   : {has_any_value.mean():.2%}")
-    if have_pid and value_cols is not None:
+    if have_pid and value_cols:
         print(f"  matched                  by_id: +{int(matched_by_id.sum())}")
     if need_fallback.any() and value_cols:
         print(
