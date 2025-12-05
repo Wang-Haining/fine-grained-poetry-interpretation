@@ -1,119 +1,143 @@
 #!/usr/bin/env python3
-# stats.py
-
-# compute basic coverage, top values for string-like columns, and numeric summaries
-# outputs are written as csv files under --out_dir
-
 import argparse
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
-from pandas.api.types import (
-    CategoricalDtype,
-    is_numeric_dtype,
-    is_object_dtype,
-    is_string_dtype,
-)
+
+# ------------------------
+# helpers
+# ------------------------
 
 
-def detect_stringy_columns(df: pd.DataFrame) -> list[str]:
-    # choose columns that are string/object/categorical; exclude ids and split
-    skip = {"poem_id", "split"}
-    cols = []
-    for c in df.columns:
-        if c in skip:
-            continue
-        dt = df[c].dtype
-        if (
-            is_string_dtype(dt)
-            or is_object_dtype(dt)
-            or isinstance(dt, CategoricalDtype)
-        ):
-            cols.append(c)
-    return cols
-
-
-def detect_numeric_columns(df: pd.DataFrame) -> list[str]:
-    # choose numeric columns
-    cols = [c for c in df.columns if is_numeric_dtype(df[c])]
-    return cols
-
-
-def ensure_out_dir(p: Path) -> None:
-    p.mkdir(parents=True, exist_ok=True)
-
-
-def coverage_overall(df: pd.DataFrame) -> pd.DataFrame:
-    # fraction non-null per column
-    cov = df.notna().mean(numeric_only=False) * 100.0
-    cov = (
-        cov.round(2)
-        .rename("coverage_pct")
-        .reset_index()
-        .rename(columns={"index": "column"})
-    )
-    return cov
-
-
-def coverage_by_split(df: pd.DataFrame, split_col: str = "split") -> pd.DataFrame:
-    # wide table: one row per split, columns are original columns
-    cov = (
-        df.groupby(split_col, dropna=False)
-        .apply(lambda g: g.notna().mean(numeric_only=False))
-        .mul(100.0)
-        .round(2)
-    )
-    cov.index.name = split_col
-    cov = cov.reset_index()
-    return cov
-
-
-def top_values_overall(df: pd.DataFrame, cols: list[str], topn: int) -> pd.DataFrame:
-    # top n value counts for each column
-    out = []
-    n = len(df)
-    for c in cols:
-        vc = df[c].dropna()
-        # turn unhashable objects (lists/dicts) into strings safely
-        vc = vc.astype(str)
-        vc = vc.value_counts().head(topn)
-        if vc.empty:
-            continue
-        temp = vc.to_frame("count").reset_index().rename(columns={"index": "value"})
-        temp["pct"] = (temp["count"] / n * 100.0).round(2)
-        temp.insert(0, "column", c)
-        out.append(temp)
+def is_categorical_dtype(dtype) -> bool:
+    # treat object, boolean, and pandas categorical as categorical-like
     return (
-        pd.concat(out, ignore_index=True)
-        if out
-        else pd.DataFrame(columns=["column", "value", "count", "pct"])
+        pd.api.types.is_object_dtype(dtype)
+        or pd.api.types.is_bool_dtype(dtype)
+        or isinstance(dtype, pd.CategoricalDtype)
+    )
+
+
+def cat_cols(df: pd.DataFrame, exclude=None):
+    exclude = set(exclude or [])
+    return [
+        c for c in df.columns if c not in exclude and is_categorical_dtype(df[c].dtype)
+    ]
+
+
+def num_cols(df: pd.DataFrame, exclude=None):
+    exclude = set(exclude or [])
+    return [
+        c
+        for c in df.columns
+        if c not in exclude and pd.api.types.is_numeric_dtype(df[c].dtype)
+    ]
+
+
+def safe_value_counts(s: pd.Series, topn: int):
+    # handle unhashable objects by stringifying
+    try:
+        vc = s.value_counts(dropna=False)
+    except TypeError:
+        vc = s.astype(str).value_counts(dropna=False)
+    return vc.head(topn)
+
+
+# ------------------------
+# coverage
+# ------------------------
+
+
+def coverage_overall(df: pd.DataFrame, exclude=None) -> pd.DataFrame:
+    exclude = set(exclude or [])
+    cols = [c for c in df.columns if c not in exclude]
+    cov = df[cols].notna().mean(numeric_only=False)
+    out = cov.reset_index()
+    out.columns = ["column", "coverage"]
+    out["coverage"] = out["coverage"].astype(float)
+    return out.sort_values("column").reset_index(drop=True)
+
+
+def coverage_by_split(
+    df: pd.DataFrame, split_col="split", exclude=None
+) -> pd.DataFrame:
+    exclude = set(exclude or [])
+    # build a 0/1 mask for non-nulls on attribute columns only
+    attrs = [c for c in df.columns if c not in exclude | {split_col}]
+    mask = df[attrs].notna().astype(float)
+    # attach split for grouping; do not use apply to avoid the warning and duplicate columns
+    mask[split_col] = df[split_col].values
+    cov = mask.groupby(split_col, dropna=False).mean(numeric_only=False).reset_index()
+    # wide -> long
+    long = cov.melt(id_vars=[split_col], var_name="column", value_name="coverage")
+    long["coverage"] = long["coverage"].astype(float)
+    return long.sort_values([split_col, "column"]).reset_index(drop=True)
+
+
+# ------------------------
+# top values
+# ------------------------
+
+
+def top_values_overall(df: pd.DataFrame, topn=25, exclude=None) -> pd.DataFrame:
+    exclude = set(exclude or [])
+    cols = cat_cols(df, exclude=exclude)
+    rows = []
+    for c in cols:
+        vc = safe_value_counts(df[c], topn)
+        total = len(df)
+        for val, cnt in vc.items():
+            rows.append(
+                {
+                    "column": c,
+                    "value": val,
+                    "count": int(cnt),
+                    "freq": float(cnt) / float(total) if total else np.nan,
+                }
+            )
+    return (
+        pd.DataFrame(rows)
+        .sort_values(["column", "count"], ascending=[True, False])
+        .reset_index(drop=True)
     )
 
 
 def top_values_by_split(
-    df: pd.DataFrame, cols: list[str], topn: int, split_col: str = "split"
+    df: pd.DataFrame, split_col="split", topn=25, exclude=None
 ) -> pd.DataFrame:
-    # top n per split
-    out = []
-    for split, g in df.groupby(split_col, dropna=False):
-        m = len(g)
-        for c in cols:
-            vc = g[c].dropna().astype(str).value_counts().head(topn)
-            if vc.empty:
-                continue
-            temp = vc.to_frame("count").reset_index().rename(columns={"index": "value"})
-            temp["pct"] = (temp["count"] / m * 100.0).round(2)
-            temp.insert(0, split_col, split)
-            temp.insert(1, "column", c)
-            out.append(temp)
+    exclude = set(exclude or [])
+    cols = cat_cols(df, exclude=exclude | {split_col})
+    rows = []
+    for c in cols:
+        for split_val, g in df.groupby(split_col, dropna=False, sort=False):
+            vc = safe_value_counts(g[c], topn)
+            total = len(g)
+            for val, cnt in vc.items():
+                rows.append(
+                    {
+                        split_col: split_val,
+                        "column": c,
+                        "value": val,
+                        "count": int(cnt),
+                        "freq": float(cnt) / float(total) if total else np.nan,
+                    }
+                )
     return (
-        pd.concat(out, ignore_index=True)
-        if out
-        else pd.DataFrame(columns=[split_col, "column", "value", "count", "pct"])
+        pd.DataFrame(rows)
+        .sort_values([split_col, "column", "count"], ascending=[True, True, False])
+        .reset_index(drop=True)
     )
 
 
-def numeric_summary_overall(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
+# ------------------------
+# numeric summaries
+# ------------------------
+
+
+def numeric_summary_overall(df: pd.DataFrame, exclude=None) -> pd.DataFrame:
+    exclude = set(exclude or [])
+    cols = num_cols(df, exclude=exclude)
     if not cols:
         return pd.DataFrame(
             columns=[
@@ -122,29 +146,47 @@ def numeric_summary_overall(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
                 "mean",
                 "std",
                 "min",
-                "25%",
-                "50%",
-                "75%",
+                "p5",
+                "median",
+                "p95",
                 "max",
             ]
         )
     desc = (
         df[cols]
-        .describe(percentiles=[0.25, 0.5, 0.75])
+        .agg(
+            [
+                "count",
+                "mean",
+                "std",
+                "min",
+                lambda x: x.quantile(0.05),
+                "median",
+                lambda x: x.quantile(0.95),
+                "max",
+            ]
+        )
         .T.reset_index()
-        .rename(columns={"index": "column"})
     )
-    # keep a stable column order
-    order = ["column", "count", "mean", "std", "min", "25%", "50%", "75%", "max"]
-    for col in order:
-        if col not in desc.columns:
-            desc[col] = pd.NA
-    return desc[order]
+    desc.columns = [
+        "column",
+        "count",
+        "mean",
+        "std",
+        "min",
+        "p5",
+        "median",
+        "p95",
+        "max",
+    ]
+    return desc
 
 
 def numeric_summary_by_split(
-    df: pd.DataFrame, cols: list[str], split_col: str = "split"
+    df: pd.DataFrame, split_col="split", exclude=None
 ) -> pd.DataFrame:
+    exclude = set(exclude or [])
+    cols = num_cols(df, exclude=exclude | {split_col})
     if not cols:
         return pd.DataFrame(
             columns=[
@@ -154,99 +196,95 @@ def numeric_summary_by_split(
                 "mean",
                 "std",
                 "min",
-                "25%",
-                "50%",
-                "75%",
+                "p5",
+                "median",
+                "p95",
                 "max",
             ]
         )
-    parts = []
-    for split, g in df.groupby(split_col, dropna=False):
-        d = (
-            g[cols]
-            .describe(percentiles=[0.25, 0.5, 0.75])
-            .T.reset_index()
-            .rename(columns={"index": "column"})
+    g = df.groupby(split_col, dropna=False)
+    pieces = []
+    for sv, sub in g:
+        stats = numeric_summary_overall(sub, exclude=None)
+        stats.insert(0, split_col, sv)
+        pieces.append(stats)
+    return (
+        pd.concat(pieces, ignore_index=True)
+        if pieces
+        else pd.DataFrame(
+            columns=[
+                split_col,
+                "column",
+                "count",
+                "mean",
+                "std",
+                "min",
+                "p5",
+                "median",
+                "p95",
+                "max",
+            ]
         )
-        d.insert(0, split_col, split)
-        parts.append(d)
-    out = pd.concat(parts, ignore_index=True)
-    order = [
-        split_col,
-        "column",
-        "count",
-        "mean",
-        "std",
-        "min",
-        "25%",
-        "50%",
-        "75%",
-        "max",
-    ]
-    for col in order:
-        if col not in out.columns:
-            out[col] = pd.NA
-    return out[order]
-
-
-def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(
-        description="compute coverage, top values, and numeric summaries from merged parquet"
     )
-    p.add_argument("--merged_path", required=True, help="path to merged parquet file")
-    p.add_argument("--out_dir", required=True, help="output directory for stats csvs")
-    p.add_argument(
-        "--topn", type=int, default=20, help="top n values for categorical columns"
-    )
-    p.add_argument(
-        "--by_split",
-        action="store_true",
-        help="also compute per-split stats if a split column exists",
-    )
-    return p.parse_args()
 
 
-def main() -> None:
-    args = parse_args()
-    merged_path = Path(args.merged_path)
+# ------------------------
+# main
+# ------------------------
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--merged_path", required=True)
+    ap.add_argument("--out_dir", default="stats_out")
+    ap.add_argument("--topn", type=int, default=25)
+    ap.add_argument("--by_split", action="store_true")
+    ap.add_argument("--split_col", default="split")
+    ap.add_argument(
+        "--id_cols",
+        default="poem_id",
+        help="comma-separated id columns to exclude from stats",
+    )
+    args = ap.parse_args()
+
     out_dir = Path(args.out_dir)
-    ensure_out_dir(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-    df = pd.read_parquet(merged_path)
+    df = pd.read_parquet(args.merged_path)
 
-    has_split = "split" in df.columns
-    if args.by_split and not has_split:
-        print(
-            "warning: --by_split requested but no 'split' column found; computing overall stats only"
-        )
+    # normalize column names if needed (no rename by default; keep original)
+    id_cols = [c.strip() for c in args.id_cols.split(",") if c.strip()]
+    exclude = set(id_cols)
 
     # coverage
-    cov_overall = coverage_overall(df)
-    cov_overall.to_csv(out_dir / "coverage_overall.csv", index=False)
+    cov_all = coverage_overall(df, exclude=exclude)
+    cov_all.to_csv(out_dir / "coverage_overall.csv", index=False)
 
-    if args.by_split and has_split:
-        cov_split = coverage_by_split(df, split_col="split")
+    if args.by_split and args.split_col in df.columns:
+        cov_split = coverage_by_split(df, split_col=args.split_col, exclude=exclude)
         cov_split.to_csv(out_dir / "coverage_by_split.csv", index=False)
 
-    # top values for string-like columns
-    stringy = detect_stringy_columns(df)
-    tv_overall = top_values_overall(df, stringy, args.topn)
-    tv_overall.to_csv(out_dir / "top_values_overall.csv", index=False)
+    # top values (categorical-like)
+    top_all = top_values_overall(df, topn=args.topn, exclude=exclude | {args.split_col})
+    top_all.to_csv(out_dir / "top_values_overall.csv", index=False)
 
-    if args.by_split and has_split:
-        tv_split = top_values_by_split(df, stringy, args.topn, split_col="split")
-        tv_split.to_csv(out_dir / "top_values_by_split.csv", index=False)
+    if args.by_split and args.split_col in df.columns:
+        top_split = top_values_by_split(
+            df, split_col=args.split_col, topn=args.topn, exclude=exclude
+        )
+        top_split.to_csv(out_dir / "top_values_by_split.csv", index=False)
 
     # numeric summaries
-    numeric_cols = detect_numeric_columns(df)
-    num_overall = numeric_summary_overall(df, numeric_cols)
-    num_overall.to_csv(out_dir / "numeric_summary_overall.csv", index=False)
+    num_all = numeric_summary_overall(df, exclude=exclude | {args.split_col})
+    num_all.to_csv(out_dir / "numeric_summary_overall.csv", index=False)
 
-    if args.by_split and has_split:
-        num_split = numeric_summary_by_split(df, numeric_cols, split_col="split")
+    if args.by_split and args.split_col in df.columns:
+        num_split = numeric_summary_by_split(
+            df, split_col=args.split_col, exclude=exclude
+        )
         num_split.to_csv(out_dir / "numeric_summary_by_split.csv", index=False)
 
-    print("done. wrote stats to", out_dir)
+    print(f"wrote outputs to {out_dir}")
 
 
 if __name__ == "__main__":
