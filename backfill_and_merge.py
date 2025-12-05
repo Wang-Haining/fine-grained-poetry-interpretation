@@ -232,24 +232,28 @@ def main():
 
     # 2) fallback: exact author_key + title_key join for rows still without any attrs
     need_fallback = ~matched_by_id
-    if need_fallback.any() and {"author_key", "title_key"}.issubset(attrs.columns):
-        left_sub = merged.loc[
-            need_fallback, ["poem_id", "author_key", "title_key"]
-        ].drop_duplicates()
-        right_cols = [
-            c for c in attrs.columns if c not in {"poem_id"}
-        ]  # avoid overwriting poem_id
-        right_sub = attrs[["author_key", "title_key", *right_cols]].drop_duplicates()
+    key_cols = ["author_key", "title_key"]
 
-        m_key = left_sub.merge(
-            right_sub, on=["author_key", "title_key"], how="left"
-        ).set_index("poem_id")
-        # write back only where we still have no attrs
-        attr_targets = [c for c in right_cols if c not in {"author_key", "title_key"}]
+    if need_fallback.any() and set(key_cols).issubset(attrs.columns):
+        # left: rows still missing attrs, keyed by normalized author/title
+        left_sub = merged.loc[need_fallback, ["poem_id", *key_cols]].drop_duplicates()
+
+        # right: one row per (author_key, title_key), keep last when multiple
+        # exclude id and key columns from the attribute payload
+        right_cols = [c for c in attrs.columns if c not in {"poem_id", *key_cols}]
+        right_sub = (
+            attrs.loc[:, [*key_cols, *right_cols]]
+            .sort_values(key_cols)
+            .drop_duplicates(subset=key_cols, keep="last")
+        )
+
+        # join on keys and map back by poem_id only for rows that still lack attrs
+        m_key = left_sub.merge(right_sub, on=key_cols, how="left").set_index("poem_id")
+
+        attr_targets = right_cols  # payload only, keys already excluded
         for c in attr_targets:
             if c not in merged.columns:
                 merged[c] = pd.NA
-            # combine_first keeps existing id-join values
             merged.loc[need_fallback, c] = merged.loc[need_fallback, c].combine_first(
                 merged.loc[need_fallback, "poem_id"].map(m_key[c])
             )
