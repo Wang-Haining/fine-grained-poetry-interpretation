@@ -10,6 +10,19 @@ from typing import Dict, Iterable, List, Optional
 
 import numpy as np
 import pandas as pd
+from pandas.api.types import is_hashable as _is_hashable
+
+
+def _to_hashable_for_counts(v):
+    # keep NaN as-is so value_counts can show it
+    if pd.isna(v):
+        return v
+    if _is_hashable(v):
+        return v
+    try:
+        return json.dumps(v, ensure_ascii=False, sort_keys=True)
+    except Exception:
+        return str(v)
 
 
 def to_lower_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -198,7 +211,8 @@ def top_values_overall(
             continue
         if pd.api.types.is_numeric_dtype(df[c]):
             continue
-        vc = df[c].value_counts(dropna=False).head(topn)
+        s = df[c].apply(_to_hashable_for_counts)
+        vc = s.value_counts(dropna=False).head(topn)
         for v, cnt in vc.items():
             out_rows.append({"column": c, "value": v, "count": int(cnt)})
     return pd.DataFrame(out_rows)
@@ -214,7 +228,8 @@ def top_values_by_split(
         for c in g.columns:
             if c in exclude or pd.api.types.is_numeric_dtype(g[c]):
                 continue
-            vc = g[c].value_counts(dropna=False).head(topn)
+            s = g[c].apply(_to_hashable_for_counts)
+            vc = s.value_counts(dropna=False).head(topn)
             for v, cnt in vc.items():
                 out_rows.append(
                     {split_col: split_val, "column": c, "value": v, "count": int(cnt)}
@@ -263,6 +278,8 @@ def main():
         "interpretation",
         "source",
         "index",
+        "poem_id_json",
+        "poem_id_file",
     }
     numeric_cols = detect_and_coerce_numeric(df, min_ratio=0.6, exclude=exclude)
 
