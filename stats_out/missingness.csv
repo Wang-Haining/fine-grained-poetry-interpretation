@@ -6,6 +6,12 @@ title,object,51356,0,100.0
 poem,object,51356,0,100.0
 interpretation,object,51356,0,100.0
 source,object,51356,0,100.0
+poem_len_chars,Int64,51356,0,100.0
+poem_len_words,int64,51356,0,100.0
+interpretation_len_chars,Int64,51356,0,100.0
+interpretation_len_words,int64,51356,0,100.0
+title_len_chars,Int64,51356,0,100.0
+title_len_words,int64,51356,0,100.0
 index,float64,0,51356,0.0
 emotions,object,0,51356,0.0
 primary_emotion,object,0,51356,0.0
