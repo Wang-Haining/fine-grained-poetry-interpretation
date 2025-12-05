@@ -52,20 +52,12 @@ def _force_id_str(df: pd.DataFrame, cols: Iterable[str]) -> pd.DataFrame:
 
 def normalize_for_poem_id_merge(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
-
-    # flatten multiindex columns if present
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = ["__".join(map(str, t)).strip() for t in df.columns.to_list()]
-
-    # ensure plain string labels then snake_case
     df.columns = [_snake(str(c).strip()) for c in df.columns]
-
-    # if poem_id is in the index, bring it back as a column
     idx_names = [n for n in getattr(df.index, "names", []) if n is not None]
     if df.index.name == "poem_id" or ("poem_id" in idx_names):
         df = df.reset_index()
-
-    # coalesce duplicate poem_id labels
     pid_cols = [c for c in df.columns if c == "poem_id"]
     if len(pid_cols) > 1:
         base = df[pid_cols].bfill(axis=1).iloc[:, 0]
@@ -73,17 +65,10 @@ def normalize_for_poem_id_merge(df: pd.DataFrame) -> pd.DataFrame:
         drop = [c for c in pid_cols if c != keep]
         df = df.drop(columns=drop)
         df[keep] = base
-
-    # drop duplicate column labels (last wins)
     df = df.loc[:, ~pd.Index(df.columns).duplicated(keep="last")]
-
-    # final sanity: exactly one poem_id column
     if (pd.Index(df.columns) == "poem_id").sum() != 1:
         raise AssertionError("poem_id label still ambiguous")
-
-    # ensure id is normalized string
     df = _force_id_str(df, ["poem_id"])
-
     return df
 
 
@@ -97,12 +82,8 @@ def read_attrs(path: Path) -> pd.DataFrame:
         df = pd.read_json(p, lines=True)
     else:
         raise ValueError(f"unsupported attrs format: {p}")
-
-    # snake all column names now (handles camelCase, spaces, etc.)
     df.columns = [_snake(c) for c in df.columns]
-    # ensure any id-like columns are strings now (before any other ops)
     df = _force_id_str(df, ["poem_id", "poem_id_file", "poem_id_json"])
-
     return df
 
 
@@ -118,10 +99,6 @@ def add_key_columns(df: pd.DataFrame, title_col: str, author_col: str) -> pd.Dat
 def stringify_nested_objects(
     df: pd.DataFrame, candidates: Optional[Iterable[str]] = None
 ) -> pd.DataFrame:
-    """
-    Convert list/dict/ndarray cells to JSON strings so Parquet preserves them.
-    Leave scalars (numbers/strings) as-is.
-    """
     df = df.copy()
     cols = list(candidates) if candidates is not None else list(df.columns)
     for c in cols:
@@ -157,7 +134,7 @@ def main():
     Path(args.out_dir).mkdir(parents=True, exist_ok=True)
     Path(Path(args.merged_out).parent).mkdir(parents=True, exist_ok=True)
 
-    # ---------- build catalog from HF dataset ----------
+    # build catalog
     ds_dict = load_dataset(args.dataset_id)
     rows = []
     for split, ds in ds_dict.items():
@@ -180,31 +157,23 @@ def main():
     catalog = pd.DataFrame(rows)
     catalog.columns = [_snake(c) for c in catalog.columns]
     catalog = add_key_columns(catalog, "title", "author")
-    # normalize/force poem_id string/lower
     catalog = normalize_for_poem_id_merge(catalog)
 
-    # ---------- read attrs ----------
+    # read attrs
     attrs = read_attrs(Path(args.attrs_path))
-
-    # prefer explicit attrs id if provided (e.g., poem_id_file)
     have_pid = "poem_id" in attrs.columns
     if args.attrs_id_col in attrs.columns and args.attrs_id_col != "poem_id":
         attrs = attrs.rename(columns={args.attrs_id_col: "poem_id"})
         have_pid = True
-
-    # fallback: derive poem_id from author/title/poem if missing and available
     if not have_pid and all(c in attrs.columns for c in ("author", "title", "poem")):
         attrs["poem_id"] = [
             poem_id(a or "", t or "", p or "")
             for a, t, p in zip(attrs["author"], attrs["title"], attrs["poem"])
         ]
         have_pid = True
-
-    # normalize ids on attrs if we have them
     attrs = normalize_for_poem_id_merge(attrs) if have_pid else attrs
     attrs = add_key_columns(attrs, "title", "author")
 
-    # stringify nested in candidate columns so Parquet stores them nicely
     meta_drop = {
         "split",
         "poem",
@@ -219,16 +188,12 @@ def main():
         "author_key",
     }
     idish = {"poem_id", "poem_id_json", "poem_id_file"}
-
     candidate = [c for c in attrs.columns if c not in meta_drop]
-    # do not stringify id columns
     candidate_no_ids = [c for c in candidate if c not in idish]
     attrs = stringify_nested_objects(attrs, candidates=candidate_no_ids)
-
-    # actual value columns = non-id, non-meta that have at least one non-null
     value_cols = [c for c in candidate_no_ids if attrs[c].notna().any()]
 
-    # ---------- sanity: show id intersection ----------
+    # sanity check: id overlap
     inter = (
         len(pd.Index(catalog["poem_id"]).intersection(pd.Index(attrs["poem_id"])))
         if have_pid
@@ -237,38 +202,56 @@ def main():
     if have_pid:
         print(f"id intersection with catalog: {inter}/{len(catalog)}")
 
-    # ---------- primary: id-based merge ----------
+    # --------- ID-BASED FILL VIA PER-COLUMN MAPS ----------
     merged = catalog.copy()
-    matched_by_id = pd.Series(False, index=merged.index)
+    matched_by_id_mask = pd.Series(False, index=merged.index)
     if have_pid and value_cols:
-        right = attrs[["poem_id"] + value_cols].drop_duplicates("poem_id")
-        # force id strings (defensive)
-        right = _force_id_str(right, ["poem_id"])
-        merged = _force_id_str(merged, ["poem_id"]).merge(
-            right, on="poem_id", how="left"
+        right = (
+            attrs[["poem_id"] + value_cols]
+            .drop_duplicates("poem_id")
+            .set_index("poem_id")
         )
-        matched_by_id = merged[value_cols].notna().any(axis=1)
+        # per-column map guarantees no suffixing or accidental overwrites
+        for c in value_cols:
+            merged[c] = merged["poem_id"].map(right[c])
+        matched_by_id_mask = merged[value_cols].notna().any(axis=1)
 
-    # ---------- fallback: exact author_key + title_key ----------
-    need_fallback = ~matched_by_id
+    # --------- FALLBACK: exact author_key+title_key ----------
+    need_fallback = ~matched_by_id_mask
     if (
         need_fallback.any()
         and {"author_key", "title_key"}.issubset(attrs.columns)
         and value_cols
     ):
-        left_sub = merged.loc[need_fallback, ["poem_id", "author_key", "title_key"]]
-        right_sub = attrs[["author_key", "title_key"] + value_cols].drop_duplicates()
-        glued = left_sub.merge(
-            right_sub, on=["author_key", "title_key"], how="left"
-        ).set_index("poem_id")
+        right_key = (
+            attrs[["author_key", "title_key"] + value_cols]
+            .drop_duplicates(subset=["author_key", "title_key"])
+            .set_index(["author_key", "title_key"])
+        )
+        lk = list(
+            zip(
+                merged.loc[need_fallback, "author_key"],
+                merged.loc[need_fallback, "title_key"],
+            )
+        )
         for c in value_cols:
-            if c not in merged.columns:
-                merged[c] = pd.NA
+            fill = [
+                (
+                    right_key.get((ak, tk), {}).get(c, np.nan)
+                    if isinstance(right_key, dict)
+                    else np.nan
+                )
+                for ak, tk in lk
+            ]  # failsafe path
+            # faster path using map on a Series of tuples
+            if not isinstance(right_key, dict):
+                s_map = pd.Series(index=right_key.index, data=right_key[c])
+                fill = pd.Series(lk).map(s_map)
             merged.loc[need_fallback, c] = merged.loc[need_fallback, c].combine_first(
-                merged.loc[need_fallback, "poem_id"].map(glued[c])
+                fill
             )
 
-    # ---------- coverage report (value columns only) ----------
+    # coverage
     has_any_value = (
         merged[value_cols].notna().any(axis=1)
         if value_cols
@@ -278,16 +261,40 @@ def main():
     print(f"with attrs: {int(has_any_value.sum())}")
     print(f"coverage   : {has_any_value.mean():.2%}")
     if have_pid and value_cols:
-        print(f"  matched                  by_id: +{int(matched_by_id.sum())}")
+        print(f"  matched                  by_id: +{int(matched_by_id_mask.sum())}")
     if need_fallback.any() and value_cols:
         print(
-            f"  filled by author+title fallback: +{int((has_any_value & ~matched_by_id).sum())}"
+            f"  filled by author+title fallback: +{int((has_any_value & ~matched_by_id_mask).sum())}"
         )
 
-    # ---------- write parquet ----------
+    # quick debug peek on a few ids that should carry attrs
+    try:
+        sample_ids = (
+            merged.loc[merged[value_cols].notna().any(axis=1), "poem_id"]
+            .head(3)
+            .tolist()
+        )
+        if not sample_ids and have_pid:
+            # if nothing set, try force-peek directly from attrs/right
+            sample_ids = (
+                attrs.loc[attrs[value_cols].notna().any(axis=1), "poem_id"]
+                .head(3)
+                .tolist()
+            )
+        if sample_ids:
+            print("sample ids with attrs:", sample_ids)
+            print(
+                merged.loc[merged["poem_id"].isin(sample_ids), ["poem_id", *value_cols]]
+                .head()
+                .to_string(index=False)
+            )
+    except Exception:
+        pass
+
+    # write
     merged.to_parquet(args.merged_out, index=False)
 
-    # ---------- optional per-row attribute jsons ----------
+    # per-row jsons (only write rows that actually have any attr)
     if args.materialize_json and value_cols:
         for split, g in merged.groupby("split", sort=False):
             base = Path(args.out_dir) / split / "rows"
