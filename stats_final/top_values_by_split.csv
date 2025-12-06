@@ -1,0 +1,249 @@
+split,column,value,count
+test,title_key,song,4
+test,title_key,prayer,2
+test,title_key,the poet,2
+test,title_key,love and grief,2
+test,title_key,content,2
+test,title_key,valentine,2
+test,title_key,mazeppa,2
+test,title_key,the martyr,2
+test,title_key,invitation,2
+test,title_key,the message,2
+test,title_key,peace,2
+test,title_key,woman to man,2
+test,title_key,dust to dust,2
+test,title_key,persuasion,2
+test,title_key,to,2
+test,title_key,the winds,2
+test,title_key,in may,2
+test,title_key,february,2
+test,title_key,a letter,2
+test,title_key,pastoral,2
+test,title_key,death,2
+test,title_key,life,2
+test,title_key,requiescat,2
+test,title_key,power of love,2
+test,title_key,the letter,2
+test,author_key,robert herrick,71
+test,author_key,madison julius cawein,62
+test,author_key,william wordsworth,57
+test,author_key,thomas moore,47
+test,author_key,ella wheeler wilcox,46
+test,author_key,unknown,42
+test,author_key,rudyard kipling,35
+test,author_key,thomas hardy,28
+test,author_key,henry lawson,26
+test,author_key,jean de la fontaine,25
+test,author_key,george macdonald,24
+test,author_key,james whitcomb riley,24
+test,author_key,john greenleaf whittier,23
+test,author_key,algernon charles swinburne,23
+test,author_key,emily elizabeth dickinson,23
+test,author_key,robert burns,23
+test,author_key,paul laurence dunbar,21
+test,author_key,paul cameron brown,21
+test,author_key,percy bysshe shelley,20
+test,author_key,francesco petrarca petrarch,19
+test,author_key,william lisle bowles,19
+test,author_key,walter de la mare,19
+test,author_key,henry wadsworth longfellow,18
+test,author_key,sara teasdale,18
+test,author_key,jonathan swift,17
+test,emotions,,2568
+test,primary_emotion,,2568
+test,sentiment,,2568
+test,themes,,2568
+test,themes_50,,2568
+train,title_key,song,68
+train,title_key,to,36
+train,title_key,sonnet,34
+train,title_key,autumn,31
+train,title_key,love,27
+train,title_key,spring,25
+train,title_key,a song,24
+train,title_key,death,20
+train,title_key,lines,19
+train,title_key,dreams,19
+train,title_key,epitaph,19
+train,title_key,hope,18
+train,title_key,night,17
+train,title_key,life,17
+train,title_key,summer,16
+train,title_key,prayer,14
+train,title_key,winter,14
+train,title_key,memory,14
+train,title_key,october,14
+train,title_key,a dream,14
+train,title_key,nocturne,14
+train,title_key,elegy,13
+train,title_key,april,13
+train,title_key,evening,13
+train,title_key,epilogue,13
+train,author_key,robert herrick,1203
+train,author_key,madison julius cawein,1056
+train,author_key,william wordsworth,887
+train,author_key,ella wheeler wilcox,862
+train,author_key,thomas moore,746
+train,author_key,unknown,682
+train,author_key,thomas hardy,626
+train,author_key,rudyard kipling,591
+train,author_key,james whitcomb riley,506
+train,author_key,george macdonald,487
+train,author_key,robert burns,464
+train,author_key,algernon charles swinburne,446
+train,author_key,john greenleaf whittier,445
+train,author_key,henry lawson,420
+train,author_key,emily elizabeth dickinson,401
+train,author_key,paul laurence dunbar,387
+train,author_key,william butler yeats,386
+train,author_key,alfred lord tennyson,361
+train,author_key,jean de la fontaine,345
+train,author_key,edgar lee masters,338
+train,author_key,john clare,337
+train,author_key,francesco petrarca petrarch,332
+train,author_key,walt whitman,331
+train,author_key,jonathan swift,323
+train,author_key,sara teasdale,309
+train,emotions,,7465
+train,emotions,"[""sadness"", ""fear"", ""anticipation""]",2946
+train,emotions,"[""joy"", ""trust"", ""anticipation""]",2144
+train,emotions,"[""sadness"", ""fear""]",1711
+train,emotions,"[""sadness"", ""fear"", ""anger""]",1325
+train,emotions,"[""sadness"", ""trust"", ""anticipation""]",1066
+train,emotions,"[""joy"", ""anticipation"", ""trust""]",971
+train,emotions,"[""sadness"", ""anticipation""]",953
+train,emotions,"[""sadness"", ""anger"", ""fear""]",896
+train,emotions,"[""sadness"", ""fear"", ""disgust""]",891
+train,emotions,"[""fear"", ""sadness"", ""anticipation""]",803
+train,emotions,"[""joy"", ""trust""]",775
+train,emotions,"[""joy"", ""surprise""]",734
+train,emotions,"[""sadness"", ""fear"", ""trust""]",704
+train,emotions,"[""sadness"", ""anticipation"", ""trust""]",645
+train,emotions,"[""sadness"", ""trust""]",599
+train,emotions,"[""sadness"", ""anticipation"", ""joy""]",574
+train,emotions,"[""sadness"", ""anticipation"", ""fear""]",552
+train,emotions,"[""trust"", ""joy"", ""anticipation""]",498
+train,emotions,"[""sadness"", ""trust"", ""joy""]",487
+train,emotions,"[""sadness"", ""anger""]",472
+train,emotions,"[""fear"", ""sadness"", ""anger""]",458
+train,emotions,"[""joy"", ""anticipation""]",439
+train,emotions,"[""sadness"", ""joy"", ""trust""]",430
+train,emotions,"[""sadness"", ""joy""]",405
+train,primary_emotion,sadness,17638
+train,primary_emotion,joy,8004
+train,primary_emotion,,7465
+train,primary_emotion,fear,4442
+train,primary_emotion,anticipation,2440
+train,primary_emotion,anger,2215
+train,primary_emotion,trust,2139
+train,primary_emotion,surprise,976
+train,primary_emotion,disgust,901
+train,sentiment,negative,22035
+train,sentiment,positive,13865
+train,sentiment,,7465
+train,sentiment,neutral,2855
+train,themes,,7465
+train,themes,[],10
+train,themes,"[""betrayal"", ""guilt"", ""repentance"", ""death"", ""shame""]",2
+train,themes,"[""tragic love"", ""jealousy"", ""sacrifice"", ""death"", ""mourning""]",2
+train,themes,"[""love satire"", ""romantic folly"", ""historical allusion"", ""social critique""]",2
+train,themes,"[""artistic freedom"", ""criticism of formalism"", ""nature as inspiration"", ""authentic creativity"", ""poet's struggle""]",2
+train,themes,"[""death"", ""mourning"", ""nature symbolism"", ""afterlife"", ""grief""]",2
+train,themes,"[""nature beauty"", ""memory"", ""solitude"", ""inspiration"", ""joy""]",2
+train,themes,"[""slave trade"", ""guilt and repentance"", ""religious redemption"", ""human cruelty"", ""psychological torment""]",1
+train,themes,"[""christ incarnation"", ""baptism redemption"", ""miraculous signs"", ""trinitarian worship"", ""biblical prophecy""]",1
+train,themes,"[""seasonal change"", ""impermanence"", ""aging"", ""existential reflection"", ""nature""]",1
+train,themes,"[""college ambition"", ""academic disillusionment"", ""midterm burnout"", ""postgraduate reflection""]",1
+train,themes,"[""aging"", ""nostalgia"", ""solitude"", ""sweet-bitter contrast""]",1
+train,themes,"[""unrequited love"", ""love as illness"", ""death and necromancy"", ""obsessive longing"", ""failed remedy""]",1
+train,themes,"[""gender inequality"", ""wine and health"", ""marital oppression"", ""social critique"", ""economic hardship""]",1
+train,themes,"[""divine protection"", ""world upheaval"", ""faith amid doubt"", ""change vs tradition"", ""spiritual reassurance""]",1
+train,themes,"[""discipline oppression"", ""darkness light"", ""love betrayal"", ""roots growth"", ""seeking comfort""]",1
+train,themes,"[""winter bleakness"", ""seasonal death"", ""religious symbolism"", ""nature's decay"", ""time's passage""]",1
+train,themes,"[""betrayal"", ""divine vengeance"", ""oppression"", ""lust"", ""downfall""]",1
+train,themes,"[""mourning"", ""death"", ""authentic grief"", ""self-disgust"", ""isolation""]",1
+train,themes,"[""mother-daughter tension"", ""rebellion"", ""generational gap"", ""coming of age"", ""respect for authority""]",1
+train,themes,"[""self-mockery"", ""inner demons"", ""pride vs humiliation"", ""artistic self-critique"", ""existential despair""]",1
+train,themes,"[""dangerous love"", ""war and peace"", ""seasonal decay"", ""surreal romance""]",1
+train,themes,"[""loss of youth"", ""cycle of years"", ""mortality"", ""renewal"", ""hope""]",1
+train,themes,"[""divine love"", ""poetic muse"", ""celebration of beauty"", ""fame pursuit"", ""spiritual devotion""]",1
+train,themes_50,[],34214
+train,themes_50,,7465
+train,themes_50,"[""loneliness""]",775
+train,themes_50,"[""death""]",537
+train,themes_50,"[""grief""]",465
+train,themes_50,"[""aging""]",261
+train,themes_50,"[""hope""]",238
+train,themes_50,"[""loss""]",222
+train,themes_50,"[""nature""]",194
+train,themes_50,"[""violence""]",174
+train,themes_50,"[""despair""]",141
+train,themes_50,"[""love""]",125
+train,themes_50,"[""identity""]",88
+train,themes_50,"[""survival""]",78
+train,themes_50,"[""time""]",59
+train,themes_50,"[""war""]",54
+train,themes_50,"[""death"", ""grief""]",53
+train,themes_50,"[""beauty""]",49
+train,themes_50,"[""illness""]",36
+train,themes_50,"[""desire""]",33
+train,themes_50,"[""social justice""]",33
+train,themes_50,"[""grief"", ""death""]",31
+train,themes_50,"[""dreams""]",26
+train,themes_50,"[""childhood""]",25
+train,themes_50,"[""death"", ""nature""]",22
+validation,title_key,dawn,4
+validation,title_key,solitude,3
+validation,title_key,speak,2
+validation,title_key,a farewell,2
+validation,title_key,winter,2
+validation,title_key,the bumblebee,2
+validation,title_key,haunted,2
+validation,title_key,to,2
+validation,title_key,fortune,2
+validation,title_key,a memory,2
+validation,title_key,how long,2
+validation,title_key,brothers,2
+validation,title_key,song,2
+validation,title_key,the brook,2
+validation,title_key,darkness,2
+validation,title_key,the dream,2
+validation,title_key,isabel,2
+validation,title_key,march,2
+validation,title_key,impromptu,2
+validation,title_key,st agnes eve,2
+validation,title_key,the blackbird,2
+validation,title_key,desire,2
+validation,title_key,knighterrant,2
+validation,title_key,night,2
+validation,title_key,mystery and solitude in topeka,1
+validation,author_key,robert herrick,82
+validation,author_key,madison julius cawein,71
+validation,author_key,william wordsworth,55
+validation,author_key,thomas moore,47
+validation,author_key,ella wheeler wilcox,42
+validation,author_key,thomas hardy,37
+validation,author_key,unknown,37
+validation,author_key,rudyard kipling,35
+validation,author_key,james whitcomb riley,27
+validation,author_key,robert burns,26
+validation,author_key,john greenleaf whittier,25
+validation,author_key,algernon charles swinburne,25
+validation,author_key,william butler yeats,24
+validation,author_key,george macdonald,24
+validation,author_key,francesco petrarca petrarch,23
+validation,author_key,jean de la fontaine,22
+validation,author_key,henry lawson,21
+validation,author_key,jonathan swift,21
+validation,author_key,john clare,21
+validation,author_key,percy bysshe shelley,21
+validation,author_key,alfred lord tennyson,20
+validation,author_key,paul laurence dunbar,20
+validation,author_key,richard le gallienne,20
+validation,author_key,johann wolfgang von goethe,19
+validation,author_key,edgar lee masters,18
+validation,emotions,,2568
+validation,primary_emotion,,2568
+validation,sentiment,,2568
+validation,themes,,2568
+validation,themes_50,,2568
