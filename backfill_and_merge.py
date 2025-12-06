@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# backfill_and_merge.py
+# merge per-poem attributes into the HF catalog; supports id-join and (split,index) fallback
+
 import argparse
 import hashlib
 import json
@@ -10,6 +13,8 @@ from typing import Iterable, Optional
 import numpy as np
 import pandas as pd
 from datasets import load_dataset
+
+# ---------- helpers ----------
 
 
 def _snake(name: str) -> str:
@@ -97,26 +102,49 @@ def add_key_columns(df: pd.DataFrame, title_col: str, author_col: str) -> pd.Dat
 def stringify_nested_objects(
     df: pd.DataFrame, candidates: Optional[Iterable[str]] = None
 ) -> pd.DataFrame:
+    # convert list/dict/ndarray to json strings; leave scalars as-is
     df = df.copy()
     cols = list(candidates) if candidates is not None else list(df.columns)
     for c in cols:
         if c not in df.columns:
             continue
+
+        def _fix(v):
+            if isinstance(v, (list, dict, np.ndarray)):
+                try:
+                    return json.dumps(v, ensure_ascii=False)
+                except Exception:
+                    return str(v)
+            return v
+
         if pd.api.types.is_object_dtype(df[c]):
-
-            def _fix(v):
-                if isinstance(v, (list, dict, np.ndarray)):
-                    try:
-                        return json.dumps(v, ensure_ascii=False)
-                    except Exception:
-                        return str(v)
-                return v
-
             df[c] = df[c].map(_fix)
     return df
 
 
+def _emptyish(v) -> bool:
+    # robust "is empty" for scalars, strings, lists, arrays
+    if v is None:
+        return True
+    try:
+        if pd.isna(v):
+            return True
+    except Exception:
+        pass
+    if isinstance(v, str):
+        s = v.strip().lower()
+        return s in {"", "nan", "none", "null"}
+    if isinstance(v, (list, tuple, dict)):
+        return len(v) == 0
+    if isinstance(v, np.ndarray):
+        return v.size == 0
+    return False
+
+
 HEX16 = re.compile(r"^[0-9a-f]{16}$")
+
+
+# ---------- main ----------
 
 
 def main():
@@ -136,7 +164,7 @@ def main():
     ds_dict = load_dataset(args.dataset_id)
     rows = []
     for split, ds in ds_dict.items():
-        for i, r in enumerate(ds):  # i is the within-split index
+        for i, r in enumerate(ds):
             author = (r.get("author") or "").strip()
             title = (r.get("title") or "").strip()
             poem = r.get("poem") or ""
@@ -144,7 +172,7 @@ def main():
             rows.append(
                 {
                     "split": split,
-                    "row_index": i,  # <- anchor for numeric-index attrs
+                    "row_index": i,  # within-split index
                     "poem_id": pid,
                     "author": author,
                     "title": title,
@@ -157,6 +185,7 @@ def main():
     catalog.columns = [_snake(c) for c in catalog.columns]
     catalog = add_key_columns(catalog, "title", "author")
     catalog = normalize_for_poem_id_merge(catalog)
+    catalog["row_index"] = pd.array(catalog["row_index"], dtype="Int64")
 
     # read attrs
     attrs = read_attrs(Path(args.attrs_path))
@@ -167,18 +196,18 @@ def main():
         attrs = attrs.rename(columns={args.attrs_id_col: "poem_id"})
         have_pid = True
 
-    # normalize IDs and add keys
+    # normalize ids and keys
     if have_pid:
         attrs = normalize_for_poem_id_merge(attrs)
     attrs = add_key_columns(attrs, "title", "author")
 
-    # detect a usable split/index pairing
-    has_split = "split" in attrs.columns
-    # coerce 'index' to numeric if present
+    # coerce index to numeric for fallback
     if "index" in attrs.columns:
         attrs["index"] = pd.to_numeric(attrs["index"], errors="coerce")
+        attrs["index"] = pd.array(attrs["index"], dtype="Int64")
+    has_split = "split" in attrs.columns
 
-    # columns we actually want to bring over
+    # choose value columns to import (drop meta/id-ish)
     meta_drop = {
         "split",
         "poem",
@@ -195,30 +224,21 @@ def main():
         "index",
         "poem_id_json",
         "poem_id_file",
-        "poem_id",  # id-ish
+        "poem_id",
     }
     candidate = [c for c in attrs.columns if c not in meta_drop]
-    candidate = (
-        stringify_nested_objects(attrs, candidates=candidate)
-        .columns.intersection(candidate)
-        .tolist()
-    )
+    # keep columns that have any non-null data
     value_cols = [c for c in candidate if attrs[c].notna().any()]
 
     merged = catalog.copy()
 
-    # ---------- pass 1: 16-hex poem_id direct map ----------
+    # ---------- pass 1: direct id join on 16-hex poem_id ----------
     matched_by_id = pd.Series(False, index=merged.index)
     if have_pid and value_cols:
         attrs_hex = attrs[attrs["poem_id"].str.fullmatch(HEX16.pattern, na=False)]
         if not attrs_hex.empty:
-            right = (
-                attrs_hex[["poem_id"] + value_cols]
-                .drop_duplicates("poem_id")
-                .set_index("poem_id")
-            )
-            for c in value_cols:
-                merged[c] = merged["poem_id"].map(right.get(c))
+            right = attrs_hex[["poem_id"] + value_cols].drop_duplicates("poem_id")
+            merged = merged.merge(right, on="poem_id", how="left")
             matched_by_id = merged[value_cols].notna().any(axis=1)
 
         inter = (
@@ -232,29 +252,33 @@ def main():
         )
         print(f"id (hex) intersection with catalog: {inter}/{len(catalog)}")
 
-    # ---------- pass 2: (split, index) -> (split, row_index) ----------
+    # ensure value columns exist post-merge (if pass 1 had no matches)
+    for c in value_cols:
+        if c not in merged.columns:
+            merged[c] = pd.NA
+
+    # ---------- pass 2: (split, index) → (split, row_index) fallback ----------
     need_fallback = ~matched_by_id
     did_fallback = pd.Series(False, index=merged.index)
-    if has_split and "index" in attrs.columns and value_cols:
-        key_cols = ["split", "index"]
-        attrs_idx = attrs.dropna(subset=["index"])[
-            key_cols + value_cols
-        ].drop_duplicates(subset=key_cols)
-        if not attrs_idx.empty:
-            right_idx = attrs_idx.set_index(key_cols)
-            # construct left key as (split, row_index)
-            left_keys = list(
-                zip(
-                    merged.loc[need_fallback, "split"],
-                    merged.loc[need_fallback, "row_index"],
-                )
-            )
+    if has_split and ("index" in attrs.columns) and value_cols:
+        left_sub = merged.loc[need_fallback, ["poem_id", "split", "row_index"]].copy()
+        left_sub["row_index"] = pd.array(left_sub["row_index"], dtype="Int64")
+
+        right_sub = (
+            attrs[["split", "index"] + value_cols]
+            .dropna(subset=["index"])
+            .drop_duplicates(subset=["split", "index"])
+        )
+        if not right_sub.empty:
+            glued = left_sub.merge(
+                right_sub,
+                left_on=["split", "row_index"],
+                right_on=["split", "index"],
+                how="left",
+            ).set_index("poem_id")
             for c in value_cols:
-                s_map = pd.Series(index=right_idx.index, data=right_idx[c])
-                fill = pd.Series(left_keys).map(s_map)
-                if c not in merged.columns:
-                    merged[c] = pd.NA
                 prev_na = merged.loc[need_fallback, c].isna()
+                fill = merged.loc[need_fallback, "poem_id"].map(glued[c])
                 merged.loc[need_fallback, c] = merged.loc[
                     need_fallback, c
                 ].combine_first(fill)
@@ -262,7 +286,7 @@ def main():
                     prev_na & merged.loc[need_fallback, c].notna()
                 )
 
-    # coverage
+    # coverage report
     have_any = (
         merged[value_cols].notna().any(axis=1)
         if value_cols
@@ -283,8 +307,10 @@ def main():
     except Exception:
         pass
 
+    # write parquet
     merged.to_parquet(args.merged_out, index=False)
 
+    # optional per-row attribute jsons
     if args.materialize_json and value_cols:
         for split, g in merged.groupby("split", sort=False):
             base = Path(args.out_dir) / split / "rows"
@@ -292,7 +318,7 @@ def main():
             att_only = g[["poem_id"] + value_cols]
             for r in att_only.to_dict(orient="records"):
                 pid = r.pop("poem_id")
-                if all(pd.isna(v) for v in r.values()):
+                if all(_emptyish(v) for v in r.values()):
                     continue
                 (base / f"{pid}.json").write_text(json.dumps(r, ensure_ascii=False))
         print("materialized json rows under:", args.out_dir)
