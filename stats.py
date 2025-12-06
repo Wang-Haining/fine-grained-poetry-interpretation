@@ -4,6 +4,7 @@
 
 import argparse
 import json
+import re
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
@@ -233,24 +234,57 @@ def top_values_by_split(
 # --- new: proper single-tag ranking for list columns ---
 
 
+# replace the entire helper with this version
 def _as_list_lower_unique(v) -> List[str]:
-    # normalize to a list[str] of unique, lowercased items
+    """
+    normalize to a list[str] (lowercased, unique).
+    handles true lists, json strings, and bracketed forms like:
+      "['death' 'nature']" or "['death','nature']"
+    also tolerates pipe/semicolon/comma-separated strings.
+    """
     if v is None or (isinstance(v, float) and np.isnan(v)):
         return []
+
+    # already a list-like
     if isinstance(v, list):
         items = v
+
     elif isinstance(v, str):
-        # try json first; otherwise treat as one token if non-empty
         s = v.strip()
         if s == "":
             return []
+
+        # try strict json first
         try:
             j = json.loads(s)
-            items = j if isinstance(j, list) else [s]
+            if isinstance(j, list):
+                items = j
+            else:
+                items = [s]
         except Exception:
-            items = [s]
+            # bracketed, possibly without commas: "['death' 'nature']"
+            if s.startswith("[") and s.endswith("]"):
+                inner = s[1:-1].strip()
+                # pull out quoted tokens regardless of comma presence
+                toks = re.findall(r"""['"]([^'"]+)['"]""", inner)
+                if toks:
+                    items = toks
+                else:
+                    # fallback: split by comma if present
+                    parts = [t.strip() for t in inner.split(",") if t.strip()]
+                    items = parts if parts else [s]
+            else:
+                # tolerate simple separators
+                sep = (
+                    "|" if "|" in s else ";" if ";" in s else "," if "," in s else None
+                )
+                if sep:
+                    items = [t.strip() for t in s.split(sep) if t.strip()]
+                else:
+                    items = [s]
     else:
         items = [str(v)]
+
     out, seen = [], set()
     for it in items:
         tok = str(it).strip().lower()
