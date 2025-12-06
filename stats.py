@@ -5,12 +5,23 @@
 import argparse
 import json
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional
 
 import numpy as np
 import pandas as pd
+from pandas.api.types import is_hashable as _is_hashable
 
-# ---------- utils ----------
+
+def _to_hashable_for_counts(v):
+    # keep NaN as-is so value_counts can show it
+    if pd.isna(v):
+        return v
+    if _is_hashable(v):
+        return v
+    try:
+        return json.dumps(v, ensure_ascii=False, sort_keys=True)
+    except Exception:
+        return str(v)
 
 
 def to_lower_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -18,227 +29,393 @@ def to_lower_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _ensure_list_str(v):
-    # normalize to list[str]
-    if v is None or (isinstance(v, float) and pd.isna(v)):
+def _maybe_parse_json_like(x):
+    if isinstance(x, (dict, list)):
+        return x
+    if isinstance(x, str):
+        s = x.strip()
+        if (s.startswith("{") and s.endswith("}")) or (
+            s.startswith("[") and s.endswith("]")
+        ):
+            try:
+                return json.loads(s)
+            except Exception:
+                return None
+    return None
+
+
+def expand_jsonish_columns(
+    df: pd.DataFrame, candidates: Optional[Iterable[str]] = None
+) -> pd.DataFrame:
+    """
+    try to flatten simple json-like columns.
+    - dict -> new columns with prefix {col}__{key}
+    - list -> new numeric column {col}__len
+    only adds numeric-ish fields. leaves original column in place.
+    """
+    if candidates is None:
+        candidates = [c for c in df.columns if df[c].dtype == "object"]
+
+    for c in candidates:
+        s = df[c]
+        if s.isna().all():
+            continue
+        sample = s.dropna().head(50)
+        parsed = sample.map(_maybe_parse_json_like)
+        if parsed.notna().mean() < 0.6:
+            continue
+        full = s.map(_maybe_parse_json_like)
+        dict_mask = full.map(lambda v: isinstance(v, dict))
+        if dict_mask.any():
+            keys = set()
+            for d in full[dict_mask].head(200):
+                keys.update(
+                    [
+                        k
+                        for k, v in d.items()
+                        if isinstance(v, (int, float))
+                        or str(v).strip().replace(".", "", 1).lstrip("-").isdigit()
+                    ]
+                )
+            for k in sorted(keys):
+                newc = f"{c}__{k}".lower()
+                df[newc] = full.map(
+                    lambda d: (d.get(k) if isinstance(d, dict) else np.nan)
+                )
+                df[newc] = pd.to_numeric(df[newc], errors="coerce")
+        list_mask = full.map(lambda v: isinstance(v, list))
+        if list_mask.any():
+            newc = f"{c}__len".lower()
+            df[newc] = full.map(lambda v: (len(v) if isinstance(v, list) else np.nan))
+    return df
+
+
+def derive_text_lengths(df: pd.DataFrame, text_cols: Iterable[str]) -> pd.DataFrame:
+    for c in text_cols:
+        if c in df.columns:
+            s = df[c].astype("string")
+            df[f"{c}_len_chars"] = s.str.len()
+            df[f"{c}_len_words"] = s.str.split().map(
+                lambda xs: len(xs) if isinstance(xs, list) else np.nan
+            )
+    return df
+
+
+def detect_and_coerce_numeric(
+    df: pd.DataFrame, min_ratio: float = 0.6, exclude: Optional[Iterable[str]] = None
+) -> List[str]:
+    """
+    treat a column as numeric if >= min_ratio of non-null values coerce to numbers
+    """
+    exclude = set([c for c in (exclude or [])])
+    numeric_cols: List[str] = []
+    for c in df.columns:
+        if c in exclude:
+            continue
+        if pd.api.types.is_numeric_dtype(df[c]):
+            numeric_cols.append(c)
+            continue
+        if df[c].dtype == "object":
+            ser = pd.to_numeric(df[c], errors="coerce")
+            if ser.notna().mean() >= min_ratio:
+                df[c] = ser
+                numeric_cols.append(c)
+    numeric_cols = [c for c in numeric_cols if df[c].notna().any()]
+    return numeric_cols
+
+
+def summarize_numeric(df: pd.DataFrame, numeric_cols: List[str]) -> pd.DataFrame:
+    if not numeric_cols:
+        return pd.DataFrame(
+            columns=[
+                "column",
+                "count",
+                "mean",
+                "std",
+                "min",
+                "p5",
+                "median",
+                "p95",
+                "max",
+            ]
+        )
+    g = df[numeric_cols]
+    out = pd.DataFrame(
+        {
+            "column": numeric_cols,
+            "count": [int(g[c].notna().sum()) for c in numeric_cols],
+            "mean": [g[c].mean() for c in numeric_cols],
+            "std": [g[c].std() for c in numeric_cols],
+            "min": [g[c].min() for c in numeric_cols],
+            "p5": [g[c].quantile(0.05) for c in numeric_cols],
+            "median": [g[c].median() for c in numeric_cols],
+            "p95": [g[c].quantile(0.95) for c in numeric_cols],
+            "max": [g[c].max() for c in numeric_cols],
+        }
+    )
+    return out
+
+
+def coverage_overall(df: pd.DataFrame) -> pd.DataFrame:
+    nn = df.notna().mean(numeric_only=False) * 100.0
+    out = nn.reset_index()
+    out.columns = ["column", "pct_non_null"]
+    out["pct_non_null"] = out["pct_non_null"].round(2)
+    return out.sort_values("pct_non_null", ascending=False, kind="mergesort")
+
+
+def coverage_by_split(df: pd.DataFrame, split_col: str = "split") -> pd.DataFrame:
+    if split_col not in df.columns:
+        return pd.DataFrame(columns=[split_col, "column", "pct_non_null"])
+    records = []
+    for split_value, g in df.groupby(split_col, dropna=False):
+        nn = g.notna().mean(numeric_only=False) * 100.0
+        rec = nn.to_frame(name="pct_non_null").reset_index(names="column")
+        rec[split_col] = split_value
+        records.append(rec)
+    out = pd.concat(records, ignore_index=True)
+    out["pct_non_null"] = out["pct_non_null"].round(2)
+    return out[[split_col, "column", "pct_non_null"]].sort_values(
+        [split_col, "pct_non_null"], ascending=[True, False], kind="mergesort"
+    )
+
+
+def missingness_table(df: pd.DataFrame) -> pd.DataFrame:
+    non_null = df.notna().sum()
+    total = len(df)
+    out = pd.DataFrame(
+        {
+            "column": non_null.index,
+            "dtype": [str(df[c].dtype) for c in df.columns],
+            "non_null": non_null.values,
+            "null": (total - non_null.values),
+            "pct_non_null": (non_null.values / total * 100).round(2),
+        }
+    )
+    return out.sort_values("pct_non_null", ascending=False, kind="mergesort")
+
+
+def top_values_overall(
+    df: pd.DataFrame, exclude: Iterable[str], topn: int
+) -> pd.DataFrame:
+    out_rows = []
+    for c in df.columns:
+        if c in exclude:
+            continue
+        if pd.api.types.is_numeric_dtype(df[c]):
+            continue
+        s = df[c].apply(_to_hashable_for_counts)
+        vc = s.value_counts(dropna=False).head(topn)
+        for v, cnt in vc.items():
+            out_rows.append({"column": c, "value": v, "count": int(cnt)})
+    return pd.DataFrame(out_rows)
+
+
+def top_values_by_split(
+    df: pd.DataFrame, split_col: str, exclude: Iterable[str], topn: int
+) -> pd.DataFrame:
+    if split_col not in df.columns:
+        return pd.DataFrame(columns=[split_col, "column", "value", "count"])
+    out_rows = []
+    for split_val, g in df.groupby(split_col, dropna=False):
+        for c in g.columns:
+            if c in exclude or pd.api.types.is_numeric_dtype(g[c]):
+                continue
+            s = g[c].apply(_to_hashable_for_counts)
+            vc = s.value_counts(dropna=False).head(topn)
+            for v, cnt in vc.items():
+                out_rows.append(
+                    {split_col: split_val, "column": c, "value": v, "count": int(cnt)}
+                )
+    return pd.DataFrame(out_rows)
+
+
+# --- new: proper single-tag ranking for list columns ---
+
+
+def _as_list_lower_unique(v) -> List[str]:
+    # normalize to a list[str] of unique, lowercased items
+    if v is None or (isinstance(v, float) and np.isnan(v)):
         return []
     if isinstance(v, list):
-        return [str(x).strip().lower() for x in v if str(x).strip() != ""]
-    if isinstance(v, tuple):
-        return [str(x).strip().lower() for x in v if str(x).strip() != ""]
-    if isinstance(v, str):
+        items = v
+    elif isinstance(v, str):
+        # try json first; otherwise treat as one token if non-empty
         s = v.strip()
-        if s == "" or s.lower() == "nan":
+        if s == "":
             return []
-        if s.startswith("[") and s.endswith("]"):
-            try:
-                j = json.loads(s)
-                if isinstance(j, list):
-                    return [str(x).strip().lower() for x in j if str(x).strip() != ""]
-            except Exception:
-                pass
-        return [s.lower()]
-    return [str(v).strip().lower()]
+        try:
+            j = json.loads(s)
+            items = j if isinstance(j, list) else [s]
+        except Exception:
+            items = [s]
+    else:
+        items = [str(v)]
+    out, seen = [], set()
+    for it in items:
+        tok = str(it).strip().lower()
+        if tok and tok not in seen:
+            seen.add(tok)
+            out.append(tok)
+    return out
 
 
-def _word_count(s: Optional[str]) -> int:
-    if s is None:
-        return 0
-    s = str(s)
-    if not s.strip():
-        return 0
-    return len(s.split())
+def tag_dist(df: pd.DataFrame, col: str) -> pd.DataFrame:
+    # counts how many rows contain each tag at least once
+    total = len(df)
+    if col not in df.columns or total == 0:
+        return pd.DataFrame(columns=[col.rstrip("s"), "count", f"pct_rows_with_{col}"])
+    cnt: Dict[str, int] = {}
+    for lst in df[col]:
+        tags = set(_as_list_lower_unique(lst))
+        for t in tags:
+            cnt[t] = cnt.get(t, 0) + 1
+    items = sorted(cnt.items(), key=lambda kv: (-kv[1], kv[0]))
+    key_name = {"emotions": "emotion", "themes": "theme", "themes_50": "theme_50"}.get(
+        col, col.rstrip("s")
+    )
+    out = pd.DataFrame(items, columns=[key_name, "count"])
+    out[f"pct_rows_with_{col}"] = (out["count"] / total * 100).round(2)
+    return out
 
 
-def _unique_authors(series: pd.Series) -> int:
+def tag_dist_by_split(
+    df: pd.DataFrame, col: str, split_col: str = "split"
+) -> pd.DataFrame:
+    if split_col not in df.columns:
+        return pd.DataFrame(columns=[split_col, col, "count", f"pct_rows_with_{col}"])
+    parts = []
+    for s, g in df.groupby(split_col, dropna=False):
+        td = tag_dist(g, col)
+        if td.empty:
+            continue
+        td.insert(0, split_col, s)
+        parts.append(td)
     return (
-        series.fillna("")
-        .astype(str)
-        .str.normalize("NFKD")
-        .str.encode("ascii", "ignore")
-        .str.decode("ascii")
-        .str.strip()
-        .str.lower()
-        .replace("", np.nan)
-        .nunique(dropna=True)
+        pd.concat(parts, ignore_index=True)
+        if parts
+        else pd.DataFrame(columns=[split_col, col, "count", f"pct_rows_with_{col}"])
     )
 
 
-# ---------- table 1: overview by source ----------
-
-
-def table1_overview_by_source(df: pd.DataFrame) -> pd.DataFrame:
-    need_cols = {"source", "author", "interpretation"}
-    missing = need_cols - set(df.columns)
-    if missing:
-        raise ValueError(f"missing required columns for table1: {missing}")
-
-    d = df.copy()
-    d["interp_wc"] = d["interpretation"].apply(_word_count)
-
-    records = []
-    for src, g in d.groupby("source", dropna=False):
-        records.append(
-            {
-                "dataset": str(src),
-                "total_poems": int(len(g)),
-                "unique_poets": int(_unique_authors(g["author"])),
-                "avg_interpretation_word_count": float(g["interp_wc"].mean()),
-            }
-        )
-    out = pd.DataFrame(records).sort_values("dataset")
-    # round for readability
-    out["avg_interpretation_word_count"] = out["avg_interpretation_word_count"].round(2)
-    return out
-
-
-# ---------- table 2: literary device frequency (simple lexical scan over interpretations) ----------
-
-# keep patterns minimal and word-bounded; counted on interpretation text only
-DEVICE_PATTERNS: List[Tuple[str, str]] = [
-    ("imagery", r"\bimagery\b"),
-    ("symbolism", r"\bsymbolism\b"),
-    ("rhyme", r"\brhyme\b|\brhymes\b|\brhyming\b"),
-    ("metaphor", r"\bmetaphor(s)?\b"),
-    ("personification", r"\bpersonification\b"),
-    ("meter", r"\bmeter\b"),  # american spelling
-    ("enjambment", r"\benjambment\b"),
-    ("simile", r"\bsimile(s)?\b"),
-    ("irony", r"\birony\b|\bironic\b"),
-    ("alliteration", r"\balliteration\b"),
-    ("hyperbole", r"\bhyperbole\b"),
-    ("symbol", r"\bsymbol(s)?\b"),
-    ("caesura", r"\bcaesura\b"),
-    ("sonnet", r"\bsonnet(s)?\b"),
-    ("paradox", r"\bparadox(es)?\b"),
-    ("onomatopoeia", r"\bonomatopoeia\b"),
-    ("apostrophe", r"\bapostrophe\b"),
-    ("anaphora", r"\banaphora\b"),
-    ("oxymoron", r"\boxymoron\b"),
-    ("assonance", r"\bassonance\b"),
-    ("allegory", r"\ballegor(y|ies)\b"),
-    ("consonance", r"\bconsonance\b"),
-    ("metre", r"\bmetre\b"),  # british spelling
-]
-
-
-def table2_device_freq(df: pd.DataFrame) -> pd.DataFrame:
-    if "interpretation" not in df.columns:
-        raise ValueError("missing column 'interpretation' for device counts")
-    s = df["interpretation"].fillna("").astype(str).str.lower()
-
-    out_rows = []
-    for name, pat in DEVICE_PATTERNS:
-        cnt = int(s.str.contains(pat, regex=True, na=False).sum())
-        out_rows.append({"device": name, "poems_with_term": cnt})
-    out = pd.DataFrame(out_rows).sort_values("poems_with_term", ascending=False)
-    return out
-
-
-# ---------- table 3: tag distributions (emotions, themes, sentiment) ----------
-
-
-def table3_emotions(df: pd.DataFrame) -> pd.DataFrame:
-    if "emotions" not in df.columns:
-        raise ValueError("missing column 'emotions'")
-    n_rows = len(df)
-    emo_lists = df["emotions"].apply(_ensure_list_str)
-
-    # per-emotion row presence
-    all_labels = sorted({e for xs in emo_lists for e in xs})
-    rows = []
-    for lab in all_labels:
-        present = emo_lists.apply(lambda xs: lab in set(xs)).sum()
-        rows.append(
-            {
-                "emotion": lab,
-                "count": int(present),
-                "pct_rows_with_emotion": round(present / n_rows * 100.0, 2),
-            }
-        )
-    return pd.DataFrame(rows).sort_values(["count", "emotion"], ascending=[False, True])
-
-
-def table3_themes_top(df: pd.DataFrame, topn: int = 20) -> pd.DataFrame:
-    if "themes" not in df.columns:
-        raise ValueError("missing column 'themes'")
-    n_rows = len(df)
-    lists = df["themes"].apply(_ensure_list_str).apply(lambda xs: sorted(set(xs)))
-    exploded = lists.explode().dropna()
-    vc = exploded.value_counts()
-    vc = vc.head(topn)
-    out = pd.DataFrame(
-        {
-            "theme": vc.index.to_list(),
-            "count": vc.values.astype(int),
-            "pct_rows_with_theme": (vc.values / n_rows * 100.0).round(2),
-        }
-    )
-    return out
-
-
-def table3_sentiment(df: pd.DataFrame) -> pd.DataFrame:
-    if "sentiment" not in df.columns:
-        raise ValueError("missing column 'sentiment'")
-    n_rows = len(df)
-    s = df["sentiment"].astype(str).str.strip().str.lower().replace({"nan": None})
-    vc = s.value_counts(dropna=True)
-    out = pd.DataFrame(
-        {
-            "sentiment": vc.index.to_list(),
-            "count": vc.values.astype(int),
-            "pct": (vc.values / n_rows * 100.0).round(2),
-        }
-    ).sort_values("count", ascending=False)
-    return out
-
-
-# ---------- main ----------
+def ensure_out_dir(p: Path):
+    p.mkdir(parents=True, exist_ok=True)
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--merged_path", required=True, help="path to merged parquet")
-    ap.add_argument("--out_dir", required=True, help="directory for csv outputs")
-    ap.add_argument("--topn", type=int, default=20, help="top-n themes to list")
-    args = ap.parse_args()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--merged_path", required=True, help="path to merged parquet")
+    parser.add_argument("--out_dir", required=True, help="directory for csv outputs")
+    parser.add_argument("--topn", type=int, default=25)
+    parser.add_argument("--by_split", action="store_true")
+    # new: allow override of list columns to explode
+    parser.add_argument(
+        "--list_cols",
+        type=str,
+        default="emotions,themes,themes_50",
+        help="comma-separated list columns to compute single-tag rankings for",
+    )
+    args = parser.parse_args()
 
     df = pd.read_parquet(args.merged_path)
     df = to_lower_columns(df)
+
+    # drop accidental duplicate column labels
     df = df.loc[:, ~df.columns.duplicated(keep="last")]
 
+    # move index back if it leaked as a named index
+    if df.index.name and df.index.name not in df.columns:
+        df = df.reset_index()
+
+    # try to flatten simple json-like columns before computing stats
+    df = expand_jsonish_columns(df)
+
+    # derive robust numeric features even if attrs are missing
+    text_candidates = [
+        c for c in ["poem", "interpretation", "title"] if c in df.columns
+    ]
+    df = derive_text_lengths(df, text_candidates)
+
+    # detect numeric columns with coercion, ignore id-ish columns
+    exclude = {
+        "poem_id",
+        "split",
+        "author",
+        "title",
+        "poem",
+        "interpretation",
+        "source",
+        "index",
+        "poem_id_json",
+        "poem_id_file",
+    }
+    numeric_cols = detect_and_coerce_numeric(df, min_ratio=0.6, exclude=exclude)
+
     out_dir = Path(args.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    ensure_out_dir(out_dir)
 
-    # table 1
-    t1 = table1_overview_by_source(df)
-    t1.to_csv(out_dir / "table1_overview_by_source.csv", index=False)
+    # missingness and coverage
+    missing = missingness_table(df)
+    missing.to_csv(out_dir / "missingness.csv", index=False)
 
-    # table 2
-    t2 = table2_device_freq(df)
-    t2.to_csv(out_dir / "table2_device_freq.csv", index=False)
+    cov_all = coverage_overall(df)
+    cov_all.to_csv(out_dir / "coverage_overall.csv", index=False)
 
-    # table 3
-    t3e = table3_emotions(df)
-    t3e.to_csv(out_dir / "table3_emotions.csv", index=False)
+    if args.by_split and "split" in df.columns:
+        cov_split = coverage_by_split(df, split_col="split")
+        cov_split.to_csv(out_dir / "coverage_by_split.csv", index=False)
 
-    t3t = table3_themes_top(df, topn=args.topn)
-    t3t.to_csv(out_dir / "table3_themes_top.csv", index=False)
+    # top values (string columns only; not for list columns anymore)
+    tv_overall = top_values_overall(
+        df,
+        exclude=exclude.union(numeric_cols).union(set(args.list_cols.split(","))),
+        topn=args.topn,
+    )
+    tv_overall.to_csv(out_dir / "top_values_overall.csv", index=False)
+    if args.by_split and "split" in df.columns:
+        tv_split = top_values_by_split(
+            df,
+            "split",
+            exclude=exclude.union(numeric_cols).union(set(args.list_cols.split(","))),
+            topn=args.topn,
+        )
+        tv_split.to_csv(out_dir / "top_values_by_split.csv", index=False)
 
-    t3s = table3_sentiment(df)
-    t3s.to_csv(out_dir / "table3_sentiment.csv", index=False)
+    # numeric summaries
+    num_all = summarize_numeric(df, numeric_cols)
+    num_all.to_csv(out_dir / "numeric_summary_overall.csv", index=False)
 
-    # tiny console summary
-    print("rows:", len(df))
-    print("wrote:")
-    for p in [
-        "table1_overview_by_source.csv",
-        "table2_device_freq.csv",
-        "table3_emotions.csv",
-        "table3_themes_top.csv",
-        "table3_sentiment.csv",
-    ]:
-        print(" -", out_dir / p)
+    if args.by_split and "split" in df.columns and numeric_cols:
+        parts = []
+        for s, g in df.groupby("split", dropna=False):
+            summ = summarize_numeric(g, numeric_cols)
+            summ.insert(0, "split", s)
+            parts.append(summ)
+        if parts:
+            pd.concat(parts, ignore_index=True).to_csv(
+                out_dir / "numeric_summary_by_split.csv", index=False
+            )
+
+    # new: single-tag distributions for list columns
+    list_cols = [c.strip() for c in args.list_cols.split(",") if c.strip()]
+    for c in list_cols:
+        if c not in df.columns:
+            continue
+        dist = tag_dist(df, c)
+        if not dist.empty:
+            fname = f"{c}_tag_dist.csv"
+            dist.to_csv(out_dir / fname, index=False)
+        if args.by_split and "split" in df.columns:
+            dist_bs = tag_dist_by_split(df, c, split_col="split")
+            if not dist_bs.empty:
+                dist_bs.to_csv(out_dir / f"{c}_tag_dist_by_split.csv", index=False)
+
+    # tiny console hints
+    print(f"rows: {len(df)}")
+    print(f"numeric columns detected: {len(numeric_cols)}")
+    print(
+        f"list columns exploded for single-tag ranks: {', '.join(list_cols) or '(none)'}"
+    )
 
 
 if __name__ == "__main__":
