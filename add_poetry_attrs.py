@@ -331,6 +331,12 @@ async def annotate_one(
         mark_status(out_dir, prov, index, "failed", error=str(exc))
         if log_failures is not None:
             log_failures.parent.mkdir(parents=True, exist_ok=True)
+            # ensure header exists
+            if not log_failures.exists():
+                with log_failures.open("w", newline="") as f:
+                    csv.writer(f).writerow(
+                        ["split", "row_index", "error_type", "error", "ts"]
+                    )
             with log_failures.open("a", newline="") as f:
                 w = csv.writer(f)
                 w.writerow(
@@ -345,28 +351,46 @@ async def annotate_one(
         raise
 
 
-def load_targets_csv(path: Path) -> Dict[str, Set[int]]:
+def load_targets(path: Path) -> Dict[str, Set[int]]:
     """
     return mapping split -> set(row_index) for targeted backfill.
-    accepts columns: split,row_index or split,index
+    accepts:
+      - CSV with columns: split,row_index (or split,index)
+      - JSONL lines with fields: split,row_index (or split,index)
     """
-    import pandas as pd
-
-    df = pd.read_csv(path)
-    cols = {c.lower(): c for c in df.columns}
-    if "split" not in cols:
-        raise ValueError("targets csv must have a 'split' column")
-    if "row_index" in cols:
-        idx_col = cols["row_index"]
-    elif "index" in cols:
-        idx_col = cols["index"]
-    else:
-        raise ValueError("targets csv must have 'row_index' or 'index' column")
     out: Dict[str, Set[int]] = {}
-    for r in df.itertuples(index=False):
-        s = getattr(r, cols["split"])
-        i = int(getattr(r, idx_col))
-        out.setdefault(str(s), set()).add(i)
+    if path.suffix.lower() == ".csv":
+        import pandas as pd
+
+        df = pd.read_csv(path)
+        cols = {c.lower(): c for c in df.columns}
+        if "split" not in cols:
+            raise ValueError("targets file must have a 'split' column")
+        if "row_index" in cols:
+            idx_col = cols["row_index"]
+        elif "index" in cols:
+            idx_col = cols["index"]
+        else:
+            raise ValueError("targets file must have 'row_index' or 'index' column")
+        for r in df.itertuples(index=False):
+            s = getattr(r, cols["split"])
+            i = int(getattr(r, idx_col))
+            out.setdefault(str(s), set()).add(i)
+        return out
+
+    # jsonl / ndjson
+    with path.open("r") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+                s = str(obj["split"])
+                idx = int(obj.get("row_index", obj.get("index")))
+                out.setdefault(s, set()).add(idx)
+            except Exception:
+                continue
     return out
 
 
@@ -386,7 +410,7 @@ async def run_all(args: argparse.Namespace) -> None:
 
     targets_map: Dict[str, Set[int]] = {}
     if args.targets_csv:
-        targets_map = load_targets_csv(Path(args.targets_csv))
+        targets_map = load_targets(Path(args.targets_csv))
         logger.info(f"loaded targets for splits: {sorted(targets_map.keys())}")
 
     backend = GuardedBackend(
@@ -395,6 +419,13 @@ async def run_all(args: argparse.Namespace) -> None:
         read_timeout=float(args.read_timeout),
     )
 
+    # pre-create failure log with header if requested
+    failure_path = Path(args.log_failures) if args.log_failures else None
+    if failure_path is not None and not failure_path.exists():
+        failure_path.parent.mkdir(parents=True, exist_ok=True)
+        with failure_path.open("w", newline="") as f:
+            csv.writer(f).writerow(["split", "row_index", "error_type", "error", "ts"])
+
     for split in splits:
         out_dir = root_out / split
         rows_dir = out_dir / "rows"
@@ -402,27 +433,33 @@ async def run_all(args: argparse.Namespace) -> None:
 
         prov = load_provenance(out_dir)
         ds = ds_dict[split]
-        total = len(ds)
+        n_total = len(ds)
 
-        # build candidate indices
-        if args.limit and args.limit > 0:
-            total = min(total, int(args.limit))
-        candidate_indices = list(range(total))
+        # start with all indices
+        candidate_indices = list(range(n_total))
 
         # restrict to targets if provided
         if targets_map:
             only = targets_map.get(split, set())
             candidate_indices = [i for i in candidate_indices if i in only]
 
-        # skip filled if requested
+        # apply limit after filtering to targets
+        if args.limit and args.limit > 0:
+            candidate_indices = candidate_indices[: int(args.limit)]
+
+        # optionally skip already-filled rows
         if args.skip_filled:
+            before = len(candidate_indices)
             candidate_indices = [
                 i
                 for i in candidate_indices
                 if not is_filled_json(rows_dir / f"{i}.json")
             ]
+            logger.info(
+                f"[{split}] skip_filled pruned {before - len(candidate_indices)} rows"
+            )
 
-        logger.info(f"[{split}] processing {len(candidate_indices)}/{len(ds)} rows")
+        logger.info(f"[{split}] processing {len(candidate_indices)}/{n_total} rows")
         sem = asyncio.Semaphore(int(args.max_concurrent))
 
         async def bounded(index: int) -> None:
@@ -435,7 +472,7 @@ async def run_all(args: argparse.Namespace) -> None:
                     out_dir=out_dir,
                     prov=prov,
                     split=split,
-                    log_failures=Path(args.log_failures) if args.log_failures else None,
+                    log_failures=failure_path,
                 )
 
         tasks = [asyncio.create_task(bounded(i)) for i in candidate_indices]
@@ -463,12 +500,11 @@ def build_cli() -> argparse.ArgumentParser:
     ap.add_argument("--splits", type=str, default="all")
     ap.add_argument("--max_concurrent", type=int, default=32)
     ap.add_argument("--limit", type=int, default=0)
-    # new controls
     ap.add_argument(
         "--targets_csv",
         type=str,
         default=None,
-        help="csv with split,row_index (or split,index)",
+        help="path to CSV (split,row_index|index) or JSONL with fields split,row_index|index",
     )
     ap.add_argument(
         "--skip_filled",
