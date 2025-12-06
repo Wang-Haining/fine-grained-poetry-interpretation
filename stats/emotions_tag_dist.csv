@@ -1,0 +1,369 @@
+emotion,count,pct_rows_with_emotions
+['sadness' 'fear' 'anticipation'],3914,7.62
+['joy' 'trust' 'anticipation'],2834,5.52
+['sadness' 'fear'],2267,4.41
+['sadness' 'fear' 'anger'],1750,3.41
+['sadness' 'trust' 'anticipation'],1376,2.68
+['joy' 'anticipation' 'trust'],1270,2.47
+['sadness' 'anticipation'],1259,2.45
+['sadness' 'anger' 'fear'],1196,2.33
+['sadness' 'fear' 'disgust'],1183,2.3
+['fear' 'sadness' 'anticipation'],1078,2.1
+['joy' 'trust'],1059,2.06
+['joy' 'surprise'],963,1.88
+['sadness' 'fear' 'trust'],951,1.85
+['sadness' 'anticipation' 'trust'],831,1.62
+['sadness' 'trust'],786,1.53
+['sadness' 'anticipation' 'joy'],748,1.46
+['sadness' 'anticipation' 'fear'],700,1.36
+['trust' 'joy' 'anticipation'],652,1.27
+['sadness' 'trust' 'joy'],638,1.24
+['fear' 'sadness' 'anger'],622,1.21
+['sadness' 'anger'],614,1.2
+['joy' 'anticipation'],597,1.16
+['sadness' 'joy' 'trust'],572,1.11
+['trust' 'anticipation' 'joy'],547,1.07
+['anticipation' 'joy' 'trust'],524,1.02
+['sadness' 'joy'],511,1.0
+['joy' 'trust' 'sadness'],486,0.95
+['fear' 'sadness'],448,0.87
+['sadness' 'anger' 'disgust'],446,0.87
+['fear' 'sadness' 'disgust'],444,0.86
+['sadness' 'joy' 'anticipation'],434,0.85
+['fear' 'anger' 'sadness'],430,0.84
+['joy' 'anticipation' 'surprise'],391,0.76
+['sadness' 'fear' 'surprise'],381,0.74
+['anger' 'disgust' 'sadness'],367,0.71
+['anticipation' 'joy' 'sadness'],364,0.71
+['fear' 'disgust' 'sadness'],351,0.68
+['sadness' 'disgust' 'fear'],348,0.68
+['joy' 'sadness'],332,0.65
+['joy' 'sadness' 'anticipation'],310,0.6
+['anger' 'sadness' 'fear'],309,0.6
+['joy' 'sadness' 'trust'],307,0.6
+['joy' 'surprise' 'anticipation'],306,0.6
+['joy' 'anticipation' 'sadness'],302,0.59
+['trust' 'joy'],299,0.58
+['trust' 'joy' 'sadness'],296,0.58
+['fear' 'sadness' 'surprise'],294,0.57
+['anger' 'sadness' 'disgust'],291,0.57
+['anticipation' 'trust' 'joy'],280,0.55
+['surprise' 'joy'],273,0.53
+['fear' 'sadness' 'trust'],268,0.52
+['sadness' 'anger' 'anticipation'],257,0.5
+['anger' 'disgust'],243,0.47
+['sadness' 'surprise'],243,0.47
+['anger' 'fear' 'sadness'],239,0.47
+['anticipation' 'joy'],239,0.47
+['anger' 'disgust' 'fear'],234,0.46
+['joy' 'surprise' 'trust'],211,0.41
+['fear' 'anticipation' 'sadness'],205,0.4
+['joy' 'trust' 'surprise'],205,0.4
+['sadness' 'fear' 'joy'],203,0.4
+['sadness' 'trust' 'fear'],188,0.37
+['sadness' 'anticipation' 'surprise'],185,0.36
+['anticipation' 'sadness' 'joy'],182,0.35
+['sadness'],176,0.34
+['trust' 'sadness' 'anticipation'],175,0.34
+['anger' 'sadness'],165,0.32
+['anticipation' 'joy' 'fear'],162,0.32
+['anticipation' 'joy' 'surprise'],161,0.31
+['sadness' 'disgust'],148,0.29
+['trust' 'anticipation'],148,0.29
+['anticipation' 'sadness'],146,0.28
+['trust' 'anticipation' 'sadness'],142,0.28
+['surprise' 'joy' 'anticipation'],134,0.26
+['disgust' 'sadness' 'anger'],130,0.25
+['fear' 'anger' 'disgust'],130,0.25
+['trust' 'sadness' 'joy'],129,0.25
+['anger' 'fear' 'disgust'],127,0.25
+['disgust' 'anger'],126,0.25
+['fear' 'anticipation'],126,0.25
+['joy' 'anticipation' 'fear'],125,0.24
+['anger' 'sadness' 'anticipation'],123,0.24
+['anticipation' 'trust'],120,0.23
+['sadness' 'disgust' 'anger'],120,0.23
+['fear' 'anger' 'anticipation'],118,0.23
+['fear' 'anticipation' 'joy'],116,0.23
+['anticipation' 'sadness' 'trust'],114,0.22
+['anticipation' 'trust' 'sadness'],113,0.22
+['sadness' 'joy' 'surprise'],110,0.21
+['disgust' 'anger' 'sadness'],108,0.21
+['disgust' 'anger' 'surprise'],108,0.21
+['sadness' 'joy' 'fear'],108,0.21
+['anger' 'disgust' 'surprise'],107,0.21
+['anger' 'fear' 'anticipation'],107,0.21
+['fear' 'anticipation' 'trust'],107,0.21
+['disgust' 'fear' 'sadness'],105,0.2
+['disgust' 'sadness' 'fear'],102,0.2
+['anticipation' 'fear' 'sadness'],98,0.19
+['joy' 'sadness' 'surprise'],95,0.18
+['fear' 'trust' 'anticipation'],93,0.18
+['surprise' 'anticipation' 'joy'],92,0.18
+['fear' 'sadness' 'joy'],91,0.18
+['anticipation' 'sadness' 'fear'],88,0.17
+['trust' 'sadness'],88,0.17
+['fear' 'trust' 'sadness'],87,0.17
+['anticipation' 'fear' 'joy'],83,0.16
+['sadness' 'anger' 'trust'],83,0.16
+['joy' 'surprise' 'sadness'],80,0.16
+['fear' 'anger'],77,0.15
+['fear' 'disgust' 'anger'],75,0.15
+['fear' 'disgust' 'surprise'],74,0.14
+['fear' 'anticipation' 'surprise'],73,0.14
+['anticipation' 'surprise'],70,0.14
+['joy' 'surprise' 'disgust'],68,0.13
+['surprise' 'joy' 'sadness'],68,0.13
+['sadness' 'anger' 'joy'],67,0.13
+['joy' 'fear' 'sadness'],65,0.13
+['surprise' 'anticipation'],65,0.13
+['anticipation' 'fear'],63,0.12
+['fear' 'surprise' 'anticipation'],62,0.12
+['trust' 'anticipation' 'fear'],62,0.12
+['surprise' 'joy' 'fear'],61,0.12
+['joy' 'sadness' 'fear'],60,0.12
+['anticipation' 'fear' 'trust'],56,0.11
+['fear' 'trust' 'joy'],56,0.11
+['anticipation' 'surprise' 'joy'],55,0.11
+['fear' 'disgust' 'anticipation'],55,0.11
+['joy' 'trust' 'fear'],55,0.11
+['sadness' 'anger' 'surprise'],55,0.11
+['disgust' 'fear' 'anger'],54,0.11
+['fear' 'surprise'],54,0.11
+['fear' 'surprise' 'sadness'],52,0.1
+['fear' 'trust'],51,0.1
+['disgust' 'sadness'],50,0.1
+['surprise' 'joy' 'disgust'],50,0.1
+['anger' 'disgust' 'anticipation'],49,0.1
+['sadness' 'anticipation' 'anger'],49,0.1
+['surprise' 'joy' 'trust'],48,0.09
+['trust' 'joy' 'fear'],47,0.09
+['trust' 'fear' 'anticipation'],46,0.09
+['anticipation' 'sadness' 'surprise'],45,0.09
+['disgust' 'anger' 'fear'],45,0.09
+['surprise' 'sadness'],45,0.09
+['anger' 'anticipation' 'joy'],44,0.09
+['fear' 'anger' 'surprise'],43,0.08
+['joy' 'surprise' 'fear'],43,0.08
+['sadness' 'disgust' 'anticipation'],43,0.08
+['joy' 'fear' 'anticipation'],42,0.08
+['sadness' 'surprise' 'anticipation'],41,0.08
+['anger' 'anticipation' 'trust'],40,0.08
+['anger' 'sadness' 'trust'],40,0.08
+['surprise' 'fear' 'sadness'],40,0.08
+['sadness' 'surprise' 'fear'],39,0.08
+['anticipation' 'trust' 'fear'],38,0.07
+['joy' 'fear' 'trust'],38,0.07
+['sadness' 'disgust' 'surprise'],38,0.07
+['disgust' 'fear' 'surprise'],36,0.07
+['trust' 'joy' 'surprise'],36,0.07
+['surprise' 'fear' 'joy'],35,0.07
+['anger' 'fear'],34,0.07
+['disgust' 'surprise'],34,0.07
+['fear' 'joy' 'trust'],34,0.07
+['sadness' 'surprise' 'joy'],34,0.07
+['surprise' 'sadness' 'anticipation'],34,0.07
+['fear' 'surprise' 'joy'],33,0.06
+['anticipation'],32,0.06
+['joy' 'disgust'],32,0.06
+['anger' 'anticipation'],31,0.06
+['fear' 'disgust'],31,0.06
+['anger' 'joy'],30,0.06
+['disgust' 'sadness' 'surprise'],30,0.06
+['surprise' 'disgust' 'joy'],30,0.06
+['surprise' 'fear' 'anticipation'],30,0.06
+['trust' 'fear' 'sadness'],30,0.06
+['anger' 'anticipation' 'sadness'],29,0.06
+['anger' 'sadness' 'joy'],29,0.06
+['anger' 'sadness' 'surprise'],29,0.06
+['anticipation' 'surprise' 'sadness'],29,0.06
+['joy' 'disgust' 'surprise'],29,0.06
+['disgust' 'joy'],27,0.05
+['fear' 'joy' 'sadness'],27,0.05
+['joy' 'fear' 'surprise'],27,0.05
+['anticipation' 'sadness' 'anger'],26,0.05
+['joy' 'fear'],26,0.05
+['disgust' 'joy' 'surprise'],25,0.05
+['fear' 'anger' 'trust'],25,0.05
+['fear' 'joy' 'anticipation'],25,0.05
+['surprise' 'anticipation' 'fear'],25,0.05
+['surprise' 'sadness' 'fear'],25,0.05
+['disgust' 'surprise' 'joy'],24,0.05
+['surprise' 'fear'],24,0.05
+['trust' 'sadness' 'fear'],24,0.05
+['anticipation' 'fear' 'surprise'],23,0.04
+['fear' 'anger' 'joy'],23,0.04
+['fear' 'joy' 'surprise'],23,0.04
+['sadness' 'trust' 'surprise'],23,0.04
+['anger' 'disgust' 'joy'],22,0.04
+['fear' 'joy'],22,0.04
+['joy' 'sadness' 'anger'],22,0.04
+['sadness' 'anticipation' 'disgust'],22,0.04
+['anger' 'joy' 'anticipation'],21,0.04
+['anticipation' 'surprise' 'fear'],21,0.04
+['joy' 'trust' 'anger'],21,0.04
+['surprise' 'anticipation' 'sadness'],21,0.04
+['anger' 'anticipation' 'fear'],20,0.04
+['anger' 'fear' 'joy'],19,0.04
+['anger' 'fear' 'surprise'],19,0.04
+['anticipation' 'trust' 'surprise'],19,0.04
+['joy' 'anger' 'anticipation'],19,0.04
+['surprise' 'fear' 'disgust'],19,0.04
+['trust' 'fear' 'joy'],19,0.04
+['anger' 'fear' 'trust'],18,0.04
+['anger' 'surprise'],18,0.04
+['disgust' 'fear' 'anticipation'],18,0.04
+['fear' 'anticipation' 'disgust'],18,0.04
+['fear' 'surprise' 'disgust'],18,0.04
+['joy' 'surprise' 'anger'],18,0.04
+['surprise' 'disgust'],18,0.04
+['anticipation' 'surprise' 'trust'],17,0.03
+['disgust' 'anger' 'joy'],17,0.03
+['disgust' 'surprise' 'sadness'],17,0.03
+['surprise' 'sadness' 'joy'],17,0.03
+['surprise' 'trust'],17,0.03
+['disgust' 'surprise' 'anger'],16,0.03
+['fear' 'anticipation' 'anger'],16,0.03
+['joy' 'anger' 'sadness'],16,0.03
+['anger' 'joy' 'sadness'],15,0.03
+['disgust' 'surprise' 'fear'],15,0.03
+['sadness' 'joy' 'anger'],15,0.03
+['surprise' 'disgust' 'fear'],15,0.03
+['trust' 'anticipation' 'surprise'],15,0.03
+['anger' 'trust' 'anticipation'],14,0.03
+['anger' 'trust'],14,0.03
+['joy' 'anger'],14,0.03
+['joy'],14,0.03
+['sadness' 'surprise' 'trust'],14,0.03
+['sadness' 'trust' 'anger'],14,0.03
+['trust' 'fear'],14,0.03
+['anger' 'joy' 'disgust'],13,0.03
+['anger' 'joy' 'fear'],13,0.03
+['joy' 'anticipation' 'disgust'],13,0.03
+['sadness' 'joy' 'disgust'],13,0.03
+['anger' 'joy' 'trust'],12,0.02
+['anticipation' 'joy' 'disgust'],12,0.02
+['fear' 'surprise' 'anger'],12,0.02
+['surprise' 'disgust' 'sadness'],12,0.02
+['surprise' 'joy' 'anger'],12,0.02
+['anger' 'surprise' 'joy'],11,0.02
+['anger' 'trust' 'joy'],11,0.02
+['anticipation' 'anger'],11,0.02
+['anticipation' 'joy' 'anger'],11,0.02
+['disgust' 'anticipation'],11,0.02
+['disgust' 'fear'],11,0.02
+['fear' 'surprise' 'trust'],11,0.02
+['sadness' 'disgust' 'joy'],11,0.02
+['surprise' 'trust' 'joy'],11,0.02
+['surprise'],11,0.02
+['anger' 'joy' 'surprise'],10,0.02
+['disgust' 'anger' 'anticipation'],10,0.02
+['disgust' 'sadness' 'anticipation'],10,0.02
+['joy' 'anticipation' 'anger'],10,0.02
+['surprise' 'trust' 'sadness'],10,0.02
+['trust'],10,0.02
+['disgust' 'joy' 'anger'],9,0.02
+['joy' 'anger' 'fear'],9,0.02
+['anticipation' 'trust' 'anger'],8,0.02
+['disgust' 'sadness' 'joy'],8,0.02
+['joy' 'anger' 'trust'],8,0.02
+['surprise' 'anticipation' 'trust'],8,0.02
+['trust' 'anticipation' 'anger'],8,0.02
+['anger' 'anticipation' 'disgust'],7,0.01
+['anticipation' 'disgust' 'fear'],7,0.01
+['anticipation' 'fear' 'anger'],7,0.01
+['anticipation' 'fear' 'disgust'],7,0.01
+['joy' 'anger' 'surprise'],7,0.01
+['joy' 'disgust' 'sadness'],7,0.01
+['joy' 'fear' 'anger'],7,0.01
+['surprise' 'fear' 'anger'],7,0.01
+['trust' 'sadness' 'anger'],7,0.01
+['anger' 'surprise' 'sadness'],6,0.01
+['anticipation' 'anger' 'fear'],6,0.01
+['anticipation' 'anger' 'joy'],6,0.01
+['anticipation' 'anger' 'sadness'],6,0.01
+['anticipation' 'sadness' 'disgust'],6,0.01
+['sadness' 'surprise' 'disgust'],6,0.01
+['surprise' 'disgust' 'anticipation'],6,0.01
+['surprise' 'sadness' 'disgust'],6,0.01
+['anger' 'surprise' 'fear'],5,0.01
+['anticipation' 'surprise' 'disgust'],5,0.01
+['disgust' 'joy' 'anticipation'],5,0.01
+['disgust' 'joy' 'sadness'],5,0.01
+['disgust' 'trust'],5,0.01
+['fear' 'trust' 'surprise'],5,0.01
+['sadness' 'surprise' 'anger'],5,0.01
+['surprise' 'anger'],5,0.01
+['trust' 'anger' 'joy'],5,0.01
+['trust' 'joy' 'anger'],5,0.01
+['trust' 'sadness' 'surprise'],5,0.01
+['anger' 'anticipation' 'surprise'],4,0.01
+['anticipation' 'disgust' 'joy'],4,0.01
+['disgust' 'anticipation' 'joy'],4,0.01
+['disgust' 'anticipation' 'sadness'],4,0.01
+['joy' 'anger' 'disgust'],4,0.01
+['joy' 'fear' 'disgust'],4,0.01
+['sadness' 'trust' 'disgust'],4,0.01
+['surprise' 'anger' 'joy'],4,0.01
+['surprise' 'anger' 'sadness'],4,0.01
+['surprise' 'anticipation' 'disgust'],4,0.01
+['surprise' 'sadness' 'anger'],4,0.01
+['trust' 'anger' 'anticipation'],4,0.01
+['trust' 'disgust'],4,0.01
+['trust' 'surprise' 'joy'],4,0.01
+['anger' 'surprise' 'disgust'],3,0.01
+['anger' 'trust' 'sadness'],3,0.01
+['anticipation' 'disgust'],3,0.01
+['disgust' 'anticipation' 'anger'],3,0.01
+['disgust' 'anticipation' 'fear'],3,0.01
+['disgust' 'anticipation' 'surprise'],3,0.01
+['disgust' 'surprise' 'anticipation'],3,0.01
+['fear' 'disgust' 'joy'],3,0.01
+['fear' 'trust' 'anger'],3,0.01
+['fear'],3,0.01
+['joy' 'sadness' 'disgust'],3,0.01
+['surprise' 'fear' 'trust'],3,0.01
+['surprise' 'sadness' 'trust'],3,0.01
+['surprise' 'trust' 'anticipation'],3,0.01
+['trust' 'anger' 'sadness'],3,0.01
+['trust' 'fear' 'anger'],3,0.01
+['trust' 'surprise'],3,0.01
+['anger' 'disgust' 'trust'],2,0.0
+['anticipation' 'anger' 'trust'],2,0.0
+['disgust' 'anger' 'trust'],2,0.0
+['fear' 'disgust' 'trust'],2,0.0
+['fear' 'trust' 'disgust'],2,0.0
+['joy' 'disgust' 'anticipation'],2,0.0
+['sadness' 'disgust' 'trust'],2,0.0
+['surprise' 'anger' 'disgust'],2,0.0
+['trust' 'anger'],2,0.0
+['trust' 'disgust' 'joy'],2,0.0
+['anger' 'surprise' 'anticipation'],1,0.0
+['anger' 'surprise' 'trust'],1,0.0
+['anger' 'trust' 'fear'],1,0.0
+['anger'],1,0.0
+['anticipation' 'anger' 'surprise'],1,0.0
+['anticipation' 'disgust' 'sadness'],1,0.0
+['anticipation' 'disgust' 'surprise'],1,0.0
+['anticipation' 'surprise' 'anger'],1,0.0
+['disgust' 'fear' 'joy'],1,0.0
+['disgust' 'fear' 'trust'],1,0.0
+['disgust' 'joy' 'fear'],1,0.0
+['disgust' 'joy' 'trust'],1,0.0
+['disgust' 'sadness' 'trust'],1,0.0
+['fear' 'joy' 'anger'],1,0.0
+['fear' 'joy' 'disgust'],1,0.0
+['joy' 'disgust' 'anger'],1,0.0
+['joy' 'disgust' 'fear'],1,0.0
+['joy' 'disgust' 'trust'],1,0.0
+['joy' 'trust' 'disgust'],1,0.0
+['surprise' 'anger' 'anticipation'],1,0.0
+['surprise' 'anger' 'fear'],1,0.0
+['surprise' 'anger' 'trust'],1,0.0
+['surprise' 'trust' 'fear'],1,0.0
+['trust' 'anger' 'disgust'],1,0.0
+['trust' 'anger' 'fear'],1,0.0
+['trust' 'anger' 'surprise'],1,0.0
+['trust' 'anticipation' 'disgust'],1,0.0
+['trust' 'joy' 'disgust'],1,0.0
+['trust' 'surprise' 'anticipation'],1,0.0

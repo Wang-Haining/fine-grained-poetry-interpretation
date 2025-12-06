@@ -19,11 +19,6 @@ title_key,the dream,16
 title_key,winter,16
 title_key,nocturne,15
 title_key,a dream,15
-title_key,faith,15
-title_key,april,15
-title_key,peace,15
-title_key,evening,14
-title_key,elegy,14
 author_key,robert herrick,1356
 author_key,madison julius cawein,1189
 author_key,william wordsworth,999
@@ -44,96 +39,14 @@ author_key,william butler yeats,424
 author_key,alfred lord tennyson,396
 author_key,jean de la fontaine,392
 author_key,john clare,374
-author_key,francesco petrarca petrarch,374
-author_key,edgar lee masters,371
-author_key,walt whitman,363
-author_key,jonathan swift,361
-author_key,percy bysshe shelley,349
-emotions,,12601
-emotions,"[""sadness"", ""fear"", ""anticipation""]",2946
-emotions,"[""joy"", ""trust"", ""anticipation""]",2144
-emotions,"[""sadness"", ""fear""]",1711
-emotions,"[""sadness"", ""fear"", ""anger""]",1325
-emotions,"[""sadness"", ""trust"", ""anticipation""]",1066
-emotions,"[""joy"", ""anticipation"", ""trust""]",971
-emotions,"[""sadness"", ""anticipation""]",953
-emotions,"[""sadness"", ""anger"", ""fear""]",896
-emotions,"[""sadness"", ""fear"", ""disgust""]",891
-emotions,"[""fear"", ""sadness"", ""anticipation""]",803
-emotions,"[""joy"", ""trust""]",775
-emotions,"[""joy"", ""surprise""]",734
-emotions,"[""sadness"", ""fear"", ""trust""]",704
-emotions,"[""sadness"", ""anticipation"", ""trust""]",645
-emotions,"[""sadness"", ""trust""]",599
-emotions,"[""sadness"", ""anticipation"", ""joy""]",574
-emotions,"[""sadness"", ""anticipation"", ""fear""]",552
-emotions,"[""trust"", ""joy"", ""anticipation""]",498
-emotions,"[""sadness"", ""trust"", ""joy""]",487
-emotions,"[""sadness"", ""anger""]",472
-emotions,"[""fear"", ""sadness"", ""anger""]",458
-emotions,"[""joy"", ""anticipation""]",439
-emotions,"[""sadness"", ""joy"", ""trust""]",430
-emotions,"[""sadness"", ""joy""]",405
-primary_emotion,sadness,17638
-primary_emotion,,12601
-primary_emotion,joy,8004
-primary_emotion,fear,4442
-primary_emotion,anticipation,2440
-primary_emotion,anger,2215
-primary_emotion,trust,2139
-primary_emotion,surprise,976
-primary_emotion,disgust,901
-sentiment,negative,22035
-sentiment,positive,13865
-sentiment,,12601
-sentiment,neutral,2855
-themes,,12601
-themes,[],10
-themes,"[""betrayal"", ""guilt"", ""repentance"", ""death"", ""shame""]",2
-themes,"[""tragic love"", ""jealousy"", ""sacrifice"", ""death"", ""mourning""]",2
-themes,"[""love satire"", ""romantic folly"", ""historical allusion"", ""social critique""]",2
-themes,"[""artistic freedom"", ""criticism of formalism"", ""nature as inspiration"", ""authentic creativity"", ""poet's struggle""]",2
-themes,"[""death"", ""mourning"", ""nature symbolism"", ""afterlife"", ""grief""]",2
-themes,"[""nature beauty"", ""memory"", ""solitude"", ""inspiration"", ""joy""]",2
-themes,"[""slave trade"", ""guilt and repentance"", ""religious redemption"", ""human cruelty"", ""psychological torment""]",1
-themes,"[""christ incarnation"", ""baptism redemption"", ""miraculous signs"", ""trinitarian worship"", ""biblical prophecy""]",1
-themes,"[""seasonal change"", ""impermanence"", ""aging"", ""existential reflection"", ""nature""]",1
-themes,"[""college ambition"", ""academic disillusionment"", ""midterm burnout"", ""postgraduate reflection""]",1
-themes,"[""aging"", ""nostalgia"", ""solitude"", ""sweet-bitter contrast""]",1
-themes,"[""unrequited love"", ""love as illness"", ""death and necromancy"", ""obsessive longing"", ""failed remedy""]",1
-themes,"[""gender inequality"", ""wine and health"", ""marital oppression"", ""social critique"", ""economic hardship""]",1
-themes,"[""divine protection"", ""world upheaval"", ""faith amid doubt"", ""change vs tradition"", ""spiritual reassurance""]",1
-themes,"[""discipline oppression"", ""darkness light"", ""love betrayal"", ""roots growth"", ""seeking comfort""]",1
-themes,"[""winter bleakness"", ""seasonal death"", ""religious symbolism"", ""nature's decay"", ""time's passage""]",1
-themes,"[""betrayal"", ""divine vengeance"", ""oppression"", ""lust"", ""downfall""]",1
-themes,"[""mourning"", ""death"", ""authentic grief"", ""self-disgust"", ""isolation""]",1
-themes,"[""mother-daughter tension"", ""rebellion"", ""generational gap"", ""coming of age"", ""respect for authority""]",1
-themes,"[""self-mockery"", ""inner demons"", ""pride vs humiliation"", ""artistic self-critique"", ""existential despair""]",1
-themes,"[""dangerous love"", ""war and peace"", ""seasonal decay"", ""surreal romance""]",1
-themes,"[""loss of youth"", ""cycle of years"", ""mortality"", ""renewal"", ""hope""]",1
-themes,"[""divine love"", ""poetic muse"", ""celebration of beauty"", ""fame pursuit"", ""spiritual devotion""]",1
-themes_50,[],34214
-themes_50,,12601
-themes_50,"[""loneliness""]",775
-themes_50,"[""death""]",537
-themes_50,"[""grief""]",465
-themes_50,"[""aging""]",261
-themes_50,"[""hope""]",238
-themes_50,"[""loss""]",222
-themes_50,"[""nature""]",194
-themes_50,"[""violence""]",174
-themes_50,"[""despair""]",141
-themes_50,"[""love""]",125
-themes_50,"[""identity""]",88
-themes_50,"[""survival""]",78
-themes_50,"[""time""]",59
-themes_50,"[""war""]",54
-themes_50,"[""death"", ""grief""]",53
-themes_50,"[""beauty""]",49
-themes_50,"[""illness""]",36
-themes_50,"[""desire""]",33
-themes_50,"[""social justice""]",33
-themes_50,"[""grief"", ""death""]",31
-themes_50,"[""dreams""]",26
-themes_50,"[""childhood""]",25
-themes_50,"[""death"", ""nature""]",22
+primary_emotion,sadness,23221
+primary_emotion,joy,10560
+primary_emotion,fear,6018
+primary_emotion,anticipation,3273
+primary_emotion,anger,2951
+primary_emotion,trust,2840
+primary_emotion,surprise,1305
+primary_emotion,disgust,1188
+sentiment,negative,29154
+sentiment,positive,18396
+sentiment,neutral,3806
