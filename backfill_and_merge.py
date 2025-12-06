@@ -99,30 +99,7 @@ def add_key_columns(df: pd.DataFrame, title_col: str, author_col: str) -> pd.Dat
     return df
 
 
-def stringify_nested_objects(
-    df: pd.DataFrame, candidates: Optional[Iterable[str]] = None
-) -> pd.DataFrame:
-    # convert list/dict/ndarray to json strings; leave scalars as-is
-    df = df.copy()
-    cols = list(candidates) if candidates is not None else list(df.columns)
-    for c in cols:
-        if c not in df.columns:
-            continue
-
-        def _fix(v):
-            if isinstance(v, (list, dict, np.ndarray)):
-                try:
-                    return json.dumps(v, ensure_ascii=False)
-                except Exception:
-                    return str(v)
-            return v
-
-        if pd.api.types.is_object_dtype(df[c]):
-            df[c] = df[c].map(_fix)
-    return df
-
-
-def _emptyish(v) -> bool:
+def emptyish(v) -> bool:
     # robust "is empty" for scalars, strings, lists, arrays
     if v is None:
         return True
@@ -139,6 +116,28 @@ def _emptyish(v) -> bool:
     if isinstance(v, np.ndarray):
         return v.size == 0
     return False
+
+
+def jsonable(v):
+    # convert to json-serializable types, preserving structure
+    if v is None:
+        return None
+    try:
+        if pd.isna(v):
+            return None
+    except Exception:
+        pass
+    if isinstance(v, np.generic):
+        return v.item()
+    if isinstance(v, np.ndarray):
+        return [jsonable(x) for x in v.tolist()]
+    if isinstance(v, list):
+        return [jsonable(x) for x in v]
+    if isinstance(v, tuple):
+        return [jsonable(x) for x in v]
+    if isinstance(v, dict):
+        return {k: jsonable(x) for k, x in v.items()}
+    return v
 
 
 HEX16 = re.compile(r"^[0-9a-f]{16}$")
@@ -227,7 +226,6 @@ def main():
         "poem_id",
     }
     candidate = [c for c in attrs.columns if c not in meta_drop]
-    # keep columns that have any non-null data
     value_cols = [c for c in candidate if attrs[c].notna().any()]
 
     merged = catalog.copy()
@@ -310,17 +308,20 @@ def main():
     # write parquet
     merged.to_parquet(args.merged_out, index=False)
 
-    # optional per-row attribute jsons
+    # optional per-row attribute jsons (robust to ndarrays etc.)
     if args.materialize_json and value_cols:
         for split, g in merged.groupby("split", sort=False):
             base = Path(args.out_dir) / split / "rows"
             base.mkdir(parents=True, exist_ok=True)
             att_only = g[["poem_id"] + value_cols]
-            for r in att_only.to_dict(orient="records"):
-                pid = r.pop("poem_id")
-                if all(_emptyish(v) for v in r.values()):
+            for rec in att_only.to_dict(orient="records"):
+                pid = rec.pop("poem_id")
+                payload = {k: jsonable(v) for k, v in rec.items()}
+                if all(emptyish(v) for v in payload.values()):
                     continue
-                (base / f"{pid}.json").write_text(json.dumps(r, ensure_ascii=False))
+                (base / f"{pid}.json").write_text(
+                    json.dumps(payload, ensure_ascii=False)
+                )
         print("materialized json rows under:", args.out_dir)
 
 
