@@ -1,5 +1,6 @@
 """
-add emotions, sentiment, and themes to poem_interpretation_corpus.
+add emotions, sentiment, themes, and themes_50 to poem_interpretation_corpus.
+robust to missing row ids; resume-safe; supports random sampling.
 """
 
 from __future__ import annotations
@@ -10,6 +11,8 @@ import csv
 import json
 import logging
 import math
+import os
+import random
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -24,7 +27,7 @@ from guarded_backend import GuardedBackend
 logger = logging.getLogger(__name__)
 
 # label spaces
-emotion_labels = [
+emotion_labels: List[str] = [
     "fear",
     "anger",
     "trust",
@@ -34,10 +37,10 @@ emotion_labels = [
     "joy",
     "surprise",
 ]
-sentiment_labels = ["positive", "negative", "neutral"]
+sentiment_labels: List[str] = ["positive", "negative", "neutral"]
 
-# fixed 50 themes used to derive themes_50
-themes_50 = [
+# fixed 50 themes used for strict themes_50
+themes_50: List[str] = [
     "nature",
     "body",
     "death",
@@ -107,13 +110,74 @@ class PoemAttrs(BaseModel):
             "joy",
             "surprise",
         ]
-    ] = Field(description="1-3 dominant emotions")
+    ] = Field(description="1-3 dominant emotions, strongest first")
+
     sentiment: Literal["positive", "negative", "neutral"] = Field(
         description="overall sentiment"
     )
+
     themes: List[str] = Field(
         default_factory=list,
-        description="open-vocabulary themes (0-5 themes)",
+        description="open-vocabulary themes (0-5 items)",
+    )
+
+    themes_50: List[
+        Literal[  # strict whitelist to avoid noisy mapping later
+            "nature",
+            "body",
+            "death",
+            "love",
+            "existential",
+            "identity",
+            "self",
+            "beauty",
+            "america",
+            "loss",
+            "animals",
+            "history",
+            "memories",
+            "family",
+            "writing",
+            "ancestry",
+            "thought",
+            "landscapes",
+            "war",
+            "time",
+            "religion",
+            "grief",
+            "violence",
+            "aging",
+            "childhood",
+            "desire",
+            "night",
+            "mothers",
+            "language",
+            "birds",
+            "social justice",
+            "music",
+            "flowers",
+            "politics",
+            "hope",
+            "heartache",
+            "fathers",
+            "gender",
+            "environment",
+            "spirituality",
+            "loneliness",
+            "oceans",
+            "dreams",
+            "survival",
+            "cities",
+            "earth",
+            "despair",
+            "anxiety",
+            "weather",
+            "illness",
+            "home",
+        ]
+    ] = Field(
+        default_factory=list,
+        description="subset of fixed 50 themes (0-5 items), only from the list provided",
     )
 
     @field_validator("emotions", mode="before")
@@ -160,6 +224,24 @@ class PoemAttrs(BaseModel):
                 seen.add(clean)
         return norm[:5]
 
+    @field_validator("themes_50", mode="before")
+    @classmethod
+    def validate_themes_50(cls, val) -> List[str]:
+        if val is None:
+            return []
+        if isinstance(val, str):
+            val = [val]
+        if not isinstance(val, list):
+            return []
+        norm: List[str] = []
+        seen: Set[str] = set()
+        for item in val:
+            s = str(item).strip().lower()
+            if s in themes_50_set and s not in seen:
+                norm.append(s)
+                seen.add(s)
+        return norm[:5]
+
 
 @dataclass
 class ProvenanceEntry:
@@ -204,7 +286,7 @@ def mark_status(
     entries[index] = ProvenanceEntry(
         index=index,
         status=status,
-        timestamp=datetime.now().isoformat(),
+        timestamp=datetime.now().isoformat(timespec="seconds"),
         error=error,
         output_path=output_path,
     )
@@ -236,14 +318,29 @@ def is_filled_json(path: Path) -> bool:
     return is_nonempty_payload(d)
 
 
+def detect_row_id(row: Dict[str, object], fallback_idx: int) -> int:
+    """
+    choose a stable id for this row for downstream join.
+    prefers 'row_index', else '__index_level_0__', else 'id', else enumerate index.
+    """
+    for key in ("row_index", "__index_level_0__", "id"):
+        if key in row:
+            try:
+                return int(row[key])  # may be numpy types
+            except Exception:
+                pass
+    return int(fallback_idx)
+
+
 def build_messages(row: Dict[str, str]) -> List[Dict[str, str]]:
     title = (row.get("title") or "").strip()
     author = (row.get("author") or "").strip()
     poem = (row.get("poem") or "").strip()
     interpretation = (row.get("interpretation") or "").strip()
 
-    max_poem_chars = 8000
-    max_interp_chars = 8000
+    # keep payload small to avoid context bloat
+    max_poem_chars = 6000
+    max_interp_chars = 4000
     if len(poem) > max_poem_chars:
         poem = poem[:max_poem_chars]
     if len(interpretation) > max_interp_chars:
@@ -252,26 +349,25 @@ def build_messages(row: Dict[str, str]) -> List[Dict[str, str]]:
     poem_missing = (not poem) or ("[mask" in poem.lower()) or ("<mask" in poem.lower())
 
     sys_prompt = (
-        "ROLE: literary annotator.\n\n"
-        "OUTPUT: JSON object with exactly three keys:\n"
+        "role: literary annotator\n\n"
+        "output: return a json object with exactly four keys:\n"
         f'- "emotions": list of 1-3 from {emotion_labels}\n'
         f'- "sentiment": one of {sentiment_labels}\n'
-        '- "themes": list of 0-5 theme strings (open vocabulary)\n\n'
-        "RULES:\n"
-        "- emotions: pick 1-3 dominant emotions, strongest first\n"
-        "- sentiment: overall valence\n"
-        "- themes: generate your own theme labels that capture the poem's content\n"
-        "  - use concise, lowercase labels (1-3 words each)\n"
-        "  - be specific and descriptive\n"
-        "  - return empty list if no clear themes\n"
-        "- output ONLY the JSON object, no markdown, no explanation"
+        '- "themes": list of 0-5 short open-vocabulary theme strings\n'
+        f'- "themes_50": list of 0-5 from this fixed set only: {themes_50}\n\n'
+        "rules:\n"
+        "- pick 1-3 dominant emotions, strongest first\n"
+        "- sentiment is overall valence\n"
+        "- for themes: concise, lowercase, specific; return [] if none are clear\n"
+        "- for themes_50: choose only from the fixed set; return [] if none fit\n"
+        "- output only the json object with those four keys"
     )
 
     user_prompt = (
         f"title: {title or 'unknown'}\n"
         f"author: {author or 'unknown'}\n\n"
-        f"POEM:\n{poem if poem else '[missing]'}\n\n"
-        f"{('INTERPRETATION (fallback only):\n' + interpretation) if poem_missing and interpretation else ''}"
+        f"poem:\n{poem if poem else '[missing]'}\n\n"
+        f"{('interpretation (fallback only):\n' + interpretation) if poem_missing and interpretation else ''}"
     )
 
     return [
@@ -283,7 +379,7 @@ def build_messages(row: Dict[str, str]) -> List[Dict[str, str]]:
 async def annotate_one(
     *,
     backend: GuardedBackend,
-    row: Dict[str, str],
+    row: Dict[str, object],
     index: int,
     out_dir: Path,
     prov: Dict[int, ProvenanceEntry],
@@ -292,46 +388,52 @@ async def annotate_one(
 ) -> None:
     rows_dir = out_dir / "rows"
     rows_dir.mkdir(parents=True, exist_ok=True)
-    out_path = rows_dir / f"{index}.json"
 
-    # skip if already filled
+    out_path = rows_dir / f"{index}.json"
     if is_filled_json(out_path):
         return
 
     mark_status(out_dir, prov, index, "running")
-
     messages = build_messages(row)
 
     try:
-        doc: PoemAttrs = await backend.guardrail(
-            messages=messages,
-            response_model=PoemAttrs,
-            max_retries=6,
-            temperature=0.0,
-            top_p=1.0,
-            max_tokens=4096,
-            reasoning_effort="medium",
-        )
-
-        open_themes = doc.themes
-        only_50 = [t for t in open_themes if t in themes_50_set]
-
-        payload = {
-            "index": index,
-            "row_index": index,  # convenience for downstream join
-            "emotions": doc.emotions,
-            "primary_emotion": doc.emotions[0] if doc.emotions else None,
-            "sentiment": doc.sentiment,
-            "themes": open_themes,
-            "themes_50": only_50,
-        }
-        out_path.write_text(json.dumps(payload, ensure_ascii=False))
-        mark_status(out_dir, prov, index, "success", output_path=str(out_path))
+        # guarded backend should retry, but we add a light belt-and-suspenders loop
+        attempts = 0
+        last_err: Optional[Exception] = None
+        while attempts < 3:
+            try:
+                doc: PoemAttrs = await backend.guardrail(
+                    messages=messages,
+                    response_model=PoemAttrs,
+                    max_retries=3,
+                    temperature=0.0,
+                    top_p=1.0,
+                    max_tokens=1024,
+                    reasoning_effort="medium",
+                )
+                # success
+                payload = {
+                    "index": index,
+                    "row_index": index,  # stable join key we control
+                    "emotions": doc.emotions,
+                    "primary_emotion": doc.emotions[0] if doc.emotions else None,
+                    "sentiment": doc.sentiment,
+                    "themes": doc.themes,
+                    "themes_50": doc.themes_50,
+                }
+                out_path.write_text(json.dumps(payload, ensure_ascii=False))
+                mark_status(out_dir, prov, index, "success", output_path=str(out_path))
+                return
+            except Exception as inner:
+                last_err = inner
+                await asyncio.sleep(1.5 * (attempts + 1))
+                attempts += 1
+        # if we get here, all tries failed
+        raise last_err or RuntimeError("unknown annotation failure")
     except Exception as exc:
         mark_status(out_dir, prov, index, "failed", error=str(exc))
         if log_failures is not None:
             log_failures.parent.mkdir(parents=True, exist_ok=True)
-            # ensure header exists
             if not log_failures.exists():
                 with log_failures.open("w", newline="") as f:
                     csv.writer(f).writerow(
@@ -348,57 +450,13 @@ async def annotate_one(
                         int(datetime.now().timestamp()),
                     ]
                 )
-        raise
-
-
-def load_targets(path: Path) -> Dict[str, Set[int]]:
-    """
-    return mapping split -> set(row_index) for targeted backfill.
-    accepts:
-      - CSV with columns: split,row_index (or split,index)
-      - JSONL lines with fields: split,row_index (or split,index)
-    """
-    out: Dict[str, Set[int]] = {}
-    if path.suffix.lower() == ".csv":
-        import pandas as pd
-
-        df = pd.read_csv(path)
-        cols = {c.lower(): c for c in df.columns}
-        if "split" not in cols:
-            raise ValueError("targets file must have a 'split' column")
-        if "row_index" in cols:
-            idx_col = cols["row_index"]
-        elif "index" in cols:
-            idx_col = cols["index"]
-        else:
-            raise ValueError("targets file must have 'row_index' or 'index' column")
-        for r in df.itertuples(index=False):
-            s = getattr(r, cols["split"])
-            i = int(getattr(r, idx_col))
-            out.setdefault(str(s), set()).add(i)
-        return out
-
-    # jsonl / ndjson
-    with path.open("r") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                obj = json.loads(line)
-                s = str(obj["split"])
-                idx = int(obj.get("row_index", obj.get("index")))
-                out.setdefault(s, set()).add(idx)
-            except Exception:
-                continue
-    return out
 
 
 async def run_all(args: argparse.Namespace) -> None:
     root_out = Path(args.out_dir)
     root_out.mkdir(parents=True, exist_ok=True)
 
-    ds_dict = load_dataset("haining/poem_interpretation_corpus")
+    ds_dict = load_dataset(args.dataset_id)
     available = list(ds_dict.keys())
     if args.splits.lower() == "all":
         splits = available
@@ -408,18 +466,12 @@ async def run_all(args: argparse.Namespace) -> None:
     logger.info(f"available splits: {available}")
     logger.info(f"selected splits: {splits}")
 
-    targets_map: Dict[str, Set[int]] = {}
-    if args.targets_csv:
-        targets_map = load_targets(Path(args.targets_csv))
-        logger.info(f"loaded targets for splits: {sorted(targets_map.keys())}")
-
     backend = GuardedBackend(
         base_url=args.base_url,
         model=args.model,
         read_timeout=float(args.read_timeout),
     )
 
-    # pre-create failure log with header if requested
     failure_path = Path(args.log_failures) if args.log_failures else None
     if failure_path is not None and not failure_path.exists():
         failure_path.parent.mkdir(parents=True, exist_ok=True)
@@ -435,19 +487,13 @@ async def run_all(args: argparse.Namespace) -> None:
         ds = ds_dict[split]
         n_total = len(ds)
 
-        # start with all indices
-        candidate_indices = list(range(n_total))
+        all_indices = list(range(n_total))
+        if args.random_sample and args.limit and args.limit > 0:
+            random.seed(args.seed)
+            candidate_indices = random.sample(all_indices, k=min(args.limit, n_total))
+        else:
+            candidate_indices = all_indices[: (args.limit or n_total)]
 
-        # restrict to targets if provided
-        if targets_map:
-            only = targets_map.get(split, set())
-            candidate_indices = [i for i in candidate_indices if i in only]
-
-        # apply limit after filtering to targets
-        if args.limit and args.limit > 0:
-            candidate_indices = candidate_indices[: int(args.limit)]
-
-        # optionally skip already-filled rows
         if args.skip_filled:
             before = len(candidate_indices)
             candidate_indices = [
@@ -462,13 +508,14 @@ async def run_all(args: argparse.Namespace) -> None:
         logger.info(f"[{split}] processing {len(candidate_indices)}/{n_total} rows")
         sem = asyncio.Semaphore(int(args.max_concurrent))
 
-        async def bounded(index: int) -> None:
+        async def bounded(row_idx: int) -> None:
             async with sem:
-                row = dict(ds[index])
+                row = dict(ds[row_idx])
+                stable_id = detect_row_id(row, row_idx)
                 await annotate_one(
                     backend=backend,
                     row=row,
-                    index=index,
+                    index=stable_id,
                     out_dir=out_dir,
                     prov=prov,
                     split=split,
@@ -493,35 +540,28 @@ async def run_all(args: argparse.Namespace) -> None:
 
 def build_cli() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser()
+    ap.add_argument(
+        "--dataset_id", type=str, default="haining/poem_interpretation_corpus"
+    )
     ap.add_argument("--base_url", type=str, required=True)
     ap.add_argument("--model", type=str, default="openai/gpt-oss-120b")
     ap.add_argument("--read_timeout", type=float, default=1800.0)
     ap.add_argument("--out_dir", type=str, default="poem_attrs")
     ap.add_argument("--splits", type=str, default="all")
     ap.add_argument("--max_concurrent", type=int, default=32)
-    ap.add_argument("--limit", type=int, default=0)
-    ap.add_argument(
-        "--targets_csv",
-        type=str,
-        default=None,
-        help="path to CSV (split,row_index|index) or JSONL with fields split,row_index|index",
-    )
+    ap.add_argument("--limit", type=int, default=1000)  # default to 1k as requested
+    ap.add_argument("--random_sample", action="store_true", help="sample random rows")
+    ap.add_argument("--seed", type=int, default=42)
     ap.add_argument(
         "--skip_filled",
         action="store_true",
         help="skip if an existing json already has non-empty fields",
     )
-    ap.add_argument(
-        "--log_failures", type=str, default=None, help="csv path to append failures"
-    )
+    ap.add_argument("--log_failures", type=str, default="poem_attrs/failures.csv")
     return ap
 
 
-def main() -> None:
+if __name__ == "__main__":
     args = build_cli().parse_args()
     logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s")
     asyncio.run(run_all(args))
-
-
-if __name__ == "__main__":
-    main()
