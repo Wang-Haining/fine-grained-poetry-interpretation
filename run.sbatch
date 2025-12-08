@@ -14,6 +14,12 @@
 
 set -euo pipefail
 
+# usage:
+#   sbatch poetry_attrs.sbatch                       # full run (default)
+#   VAR=pilot sbatch poetry_attrs.sbatch            # 1000-sample pilot
+#   PILOT_1000=1 sbatch poetry_attrs.sbatch         # alternative toggle
+#   LIMIT=500 OUT_DIR=poem_attrs_500 sbatch ...     # explicit override
+
 # ---- environment setup (tempest) ----
 module purge
 module unload Python CUDA 2>/dev/null || true
@@ -22,8 +28,7 @@ source .venv/bin/activate
 
 # ---- model/server knobs ----
 MODEL="${MODEL:-openai/gpt-oss-120b}"
-# poems are short; no need for a giant context
-MAXLEN="${MAXLEN:-16384}"
+MAXLEN="${MAXLEN:-16384}"         # poems are short; no need for giant context
 MAX_SEQS="${MAX_SEQS:-16}"
 GPU_UTIL="${GPU_UTIL:-0.85}"
 
@@ -36,17 +41,31 @@ IMG_FILE="${IMG_FILE:-$HOME/containers/vllm-gptoss.sif}"
 HOST="${HOST:-127.0.0.1}"
 PORT="${PORT:-8020}"
 
-# ---- httpx tuning for GuardedBackend ----
+# ---- httpx tuning for guarded backend ----
 export HTTP_POOL="${HTTP_POOL:-256}"
 export HTTP_KEEPALIVE="${HTTP_KEEPALIVE:-120}"
 export HTTP_POOL_TIMEOUT="${HTTP_POOL_TIMEOUT:-600}"
 
-# ---- poetry attrs settings ----
-OUT_DIR="${OUT_DIR:-poem_attrs}"
-# NEW: support all splits or a comma list like "train,validation,test"
-SPLITS="${SPLITS:-all}"
+# ---- pilot/full mode selection (default full) ----
+MODE="full"
+if [[ "${VAR:-}" == "pilot" || "${PILOT_1000:-0}" == "1" ]]; then
+  MODE="pilot"
+fi
+
+# ---- poetry attrs settings (defaults depend on mode) ----
+# script entrypoint can be swapped via env
+SCRIPT="${SCRIPT:-add_poetry_attrs_v2.py}"
+
+if [[ "$MODE" == "pilot" ]]; then
+  OUT_DIR="${OUT_DIR:-poem_attrs_1000}"
+  LIMIT="${LIMIT:-1000}"
+else
+  OUT_DIR="${OUT_DIR:-poem_attrs}"
+  LIMIT="${LIMIT:-0}"              # 0 = no cap (full dataset)
+fi
+
+SPLITS="${SPLITS:-all}"            # can be "all" or "train,validation,test"
 MAX_CONCURRENT="${MAX_CONCURRENT:-8}"
-LIMIT="${LIMIT:-0}"
 
 CUDA_BIND="/mnt/shared/moduleapps/eb/CUDA/12.3.0"
 export PYTHONUNBUFFERED=1
@@ -56,10 +75,12 @@ mkdir -p logs "$HF_HOME" "$OUT_DIR"
 export PYTHONPATH="$PWD:${PYTHONPATH:-}"
 ulimit -n 65535 || true
 
-# HF token via env or file
+# hf token via env or file
 export HF_TOKEN="${HF_TOKEN:-$(cat "$HF_HOME/token" 2>/dev/null || echo)}"
 
 echo "[info] poetry-attrs job starting"
+echo "[mode] ${MODE}"
+echo "[script] ${SCRIPT}"
 echo "[output] OUT_DIR=${OUT_DIR}"
 echo "[model] MODEL=${MODEL}"
 echo "[splits] SPLITS=${SPLITS}"
@@ -69,7 +90,7 @@ echo "[limit] LIMIT=${LIMIT}"
 API="http://${HOST}:${PORT}"
 TP=1
 
-echo "[server] starting vLLM on ${API} (tensor-parallel=${TP})"
+echo "[server] starting vllm on ${API} (tensor-parallel=${TP})"
 
 command -v apptainer >/dev/null || { echo "[fatal] apptainer missing"; exit 90; }
 [[ -f "$IMG_FILE" ]] || { echo "[fatal] image missing: $IMG_FILE"; exit 91; }
@@ -108,7 +129,7 @@ curl -fsS "${API}/v1/chat/completions" -H "Content-Type: application/json" \
 echo "[poetry] starting annotation..."
 START_TS="$(date +%s)"
 
-CMD="$STDBUF python add_poetry_attrs.py \
+CMD="$STDBUF python ${SCRIPT} \
   --base_url \"${API}\" \
   --model \"${MODEL}\" \
   --read_timeout \"${READ_TIMEOUT}\" \
@@ -124,7 +145,7 @@ END_TS=$(date +%s)
 DUR=$((END_TS - START_TS))
 
 echo ""
-echo "=== POETRY ATTRS COMPLETE ==="
+echo "=== poetry attrs complete ==="
 echo "[duration] ${DUR}s"
 echo "[model] ${MODEL}"
 echo "[output] ${OUT_DIR}/"
