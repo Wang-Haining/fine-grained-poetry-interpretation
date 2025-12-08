@@ -1,6 +1,7 @@
 """
-merge per-row or per-split json annotations into the original dataset.
-writes split-wise parquet with five new columns.
+merge json rows from new annotator into the hf dataset.
+layout expected: <attrs_dir>/<split>/rows/*.json
+joins on 'row_index'. writes <out_dir>/<split>.parquet.
 """
 
 from __future__ import annotations
@@ -13,82 +14,63 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 from datasets import load_dataset
 
+TARGET_COLS = ["emotions", "primary_emotion", "sentiment", "themes", "themes_50"]
 
-def _coerce_int(x: Any) -> Optional[int]:
+
+def coerce_int(x: Any) -> Optional[int]:
     try:
         if isinstance(x, bool):
             return None
-        if isinstance(x, (int,)):
-            return int(x)
+        if isinstance(x, int):
+            return x
         if isinstance(x, float) and x.is_integer():
             return int(x)
-        if isinstance(x, str) and x.strip().isdigit():
-            return int(x.strip())
+        if isinstance(x, str):
+            s = x.strip()
+            if s.startswith("+"):
+                s = s[1:]
+            if s.isdigit():
+                return int(s)
     except Exception:
         pass
     return None
 
 
-def _extract_index(d: Dict[str, Any], fallback: int) -> int:
-    # try common top level keys
-    for k in ("row_index", "index", "row_id", "id"):
-        v = d.get(k)
-        idx = _coerce_int(v)
-        if idx is not None:
-            return idx
-    # try nested meta
-    meta = d.get("meta", {})
-    if isinstance(meta, dict):
-        for k in ("row_index", "index", "row_id", "id"):
-            v = meta.get(k)
-            idx = _coerce_int(v)
-            if idx is not None:
-                return idx
-    return fallback
-
-
-def load_split_payloads(attrs_root: Path, split: str) -> Dict[int, Dict[str, Any]]:
-    """
-    Load annotations for a split from either:
-      1) per split jsonl at {attrs_root}/{split}.jsonl, or
-      2) per row json files under {attrs_root}/{split}/rows/*.json
-
-    If both exist, per row files take precedence for the same index.
-    """
+def load_row_payloads(rows_dir: Path) -> Dict[int, Dict[str, Any]]:
     out: Dict[int, Dict[str, Any]] = {}
-
-    # case 1: jsonl
-    jl = attrs_root / f"{split}.jsonl"
-    if jl.exists():
+    if not rows_dir.exists():
+        return out
+    for p in rows_dir.glob("*.json"):
         try:
-            with jl.open("r", encoding="utf-8") as f:
-                for i, line in enumerate(f):
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        d = json.loads(line)
-                    except Exception:
-                        continue
-                    idx = _extract_index(d, fallback=i)
-                    out[idx] = d
+            d = json.loads(p.read_text(encoding="utf-8"))
         except Exception:
-            pass
+            continue
+        idx = coerce_int(d.get("row_index"))
+        if idx is None:
+            idx = coerce_int(p.stem)
+        if idx is None:
+            continue
+        out[int(idx)] = d
+    return out
 
-    # case 2: rows/*.json overrides
-    rows_dir = attrs_root / split / "rows"
-    if rows_dir.exists():
-        for p in rows_dir.glob("*.json"):
-            try:
-                d = json.loads(p.read_text(encoding="utf-8"))
-                stem_idx = _coerce_int(p.stem)
-                idx = _extract_index(
-                    d, fallback=stem_idx if stem_idx is not None else 0
-                )
-                out[idx] = d
-            except Exception:
-                continue
 
+def drop_and_recreate_cols(df: pd.DataFrame) -> None:
+    for c in TARGET_COLS:
+        if c in df.columns:
+            df.drop(columns=[c], inplace=True)
+        df[c] = pd.Series([pd.NA] * len(df), dtype="object")
+
+
+def build_rowindex_to_pos(df: pd.DataFrame) -> Dict[int, int]:
+    # prefer explicit row_index if present; else fall back to enumerate index
+    if "row_index" in df.columns:
+        keys = [coerce_int(v) for v in df["row_index"].tolist()]
+    else:
+        keys = list(range(len(df)))
+    out: Dict[int, int] = {}
+    for pos, k in enumerate(keys):
+        kk = pos if k is None else int(k)
+        out[kk] = pos
     return out
 
 
@@ -97,45 +79,31 @@ def merge_split(ds_id: str, split: str, attrs_root: Path, out_root: Path) -> Pat
     df = ds.to_pandas()
     df.columns = [c.lower() for c in df.columns]
 
-    payloads = load_split_payloads(attrs_root, split)
+    rows_dir = attrs_root / split / "rows"
+    payloads = load_row_payloads(rows_dir)
 
-    # init new columns
-    for col in ("emotions", "primary_emotion", "sentiment", "themes", "themes_50"):
-        if col not in df.columns:
-            df[col] = None
+    drop_and_recreate_cols(df)
+    idx2pos = build_rowindex_to_pos(df)
 
-    # pick a stable key on the dataframe side
-    df_keys: List[Optional[int]] = []
-    has_row_index = "row_index" in df.columns
-    has_idx_level = "__index_level_0__" in df.columns
-    has_id = "id" in df.columns
-
-    for i in range(len(df)):
-        key: Optional[int] = None
-        if has_row_index:
-            key = _coerce_int(df.iloc[i]["row_index"])
-        if key is None and has_idx_level:
-            key = _coerce_int(df.iloc[i]["__index_level_0__"])
-        if key is None and has_id:
-            key = _coerce_int(df.iloc[i]["id"])
-        if key is None:
-            key = i
-        df_keys.append(key)
-
-    # fill values from payloads
-    for i, key in enumerate(df_keys):
-        d = payloads.get(int(key))
-        if not d:
+    matched = 0
+    for ridx, d in payloads.items():
+        pos = idx2pos.get(int(ridx))
+        if pos is None:
             continue
-        df.at[i, "emotions"] = d.get("emotions")
-        df.at[i, "primary_emotion"] = d.get("primary_emotion")
-        df.at[i, "sentiment"] = d.get("sentiment")
-        df.at[i, "themes"] = d.get("themes")
-        df.at[i, "themes_50"] = d.get("themes_50")
+        df.at[pos, "emotions"] = d.get("emotions")
+        df.at[pos, "primary_emotion"] = d.get("primary_emotion")
+        df.at[pos, "sentiment"] = d.get("sentiment")
+        df.at[pos, "themes"] = d.get("themes")
+        df.at[pos, "themes_50"] = d.get("themes_50")
+        matched += 1
 
     out_root.mkdir(parents=True, exist_ok=True)
     out_path = out_root / f"{split}.parquet"
     df.to_parquet(out_path, index=False)
+
+    print(
+        f"[merge] split={split} json_rows={len(payloads)} matched={matched} -> {out_path}"
+    )
     return out_path
 
 
@@ -146,8 +114,12 @@ if __name__ == "__main__":
         type=str,
         default="haining/structured_poem_interpretation_corpus",
     )
-    ap.add_argument("--attrs_dir", type=str, default="poem_attrs")
-    ap.add_argument("--out_dir", type=str, default="poem_attrs/merged")
+    ap.add_argument(
+        "--attrs_dir", type=str, default="poem_attrs"
+    )  # expects <split>/rows/*.json
+    ap.add_argument(
+        "--out_dir", type=str, default="poem_attrs/merged"
+    )  # writes <split>.parquet
     ap.add_argument("--splits", type=str, default="train,validation,test")
     args = ap.parse_args()
 
