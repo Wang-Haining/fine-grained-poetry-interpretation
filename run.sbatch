@@ -54,7 +54,7 @@ fi
 
 # ---- poetry attrs settings (defaults depend on mode) ----
 # script entrypoint can be swapped via env
-SCRIPT="${SCRIPT:-add_poetry_attrs_v2.py}"
+SCRIPT="${SCRIPT:-add_poetry_attrs.py}"
 
 if [[ "$MODE" == "pilot" ]]; then
   OUT_DIR="${OUT_DIR:-poem_attrs_1000}"
