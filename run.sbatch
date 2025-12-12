@@ -15,10 +15,9 @@
 set -euo pipefail
 
 # usage:
-#   sbatch poetry_attrs.sbatch                       # full run (default)
-#   VAR=pilot sbatch poetry_attrs.sbatch            # 1000-sample pilot
-#   PILOT_1000=1 sbatch poetry_attrs.sbatch         # alternative toggle
-#   LIMIT=500 OUT_DIR=poem_attrs_500 sbatch ...     # explicit override
+#   sbatch poetry_attrs.sbatch                          # full run
+#   VAR=rest SPLITS=train sbatch poetry_attrs.sbatch    # only missing rows for train
+#   LIMIT=500 OUT_DIR=poem_attrs_500 sbatch ...         # explicit override
 
 # ---- environment setup (tempest) ----
 module purge
@@ -28,12 +27,12 @@ source .venv/bin/activate
 
 # ---- model/server knobs ----
 MODEL="${MODEL:-openai/gpt-oss-120b}"
-MAXLEN="${MAXLEN:-16384}"         # poems are short; no need for giant context
+MAXLEN="${MAXLEN:-16384}"
 MAX_SEQS="${MAX_SEQS:-16}"
 GPU_UTIL="${GPU_UTIL:-0.85}"
 
 # ---- app settings ----
-READ_TIMEOUT="${READ_TIMEOUT:-600}"
+READ_TIMEOUT="${READ_TIMEOUT:-1800}"
 
 # ---- paths and container ----
 HF_HOME="${HF_HOME:-$HOME/hf-cache}"
@@ -46,25 +45,26 @@ export HTTP_POOL="${HTTP_POOL:-256}"
 export HTTP_KEEPALIVE="${HTTP_KEEPALIVE:-120}"
 export HTTP_POOL_TIMEOUT="${HTTP_POOL_TIMEOUT:-600}"
 
-# ---- pilot/full mode selection (default full) ----
+# ---- mode selection ----
+# "full" processes everything (LIMIT=0); "rest" finishes only missing rows
 MODE="full"
-if [[ "${VAR:-}" == "pilot" || "${PILOT_1000:-0}" == "1" ]]; then
-  MODE="pilot"
+if [[ "${VAR:-}" == "rest" || "${MISSING_ONLY:-0}" == "1" ]]; then
+  MODE="rest"
 fi
 
-# ---- poetry attrs settings (defaults depend on mode) ----
-# script entrypoint can be swapped via env
+# ---- script + io ----
 SCRIPT="${SCRIPT:-add_poetry_attrs.py}"
+DATASET_ID="${DATASET_ID:-haining/poem_interpretation_corpus}"
 
-if [[ "$MODE" == "pilot" ]]; then
-  OUT_DIR="${OUT_DIR:-poem_attrs_1000}"
-  LIMIT="${LIMIT:-1000}"
-else
+if [[ "$MODE" == "full" ]]; then
   OUT_DIR="${OUT_DIR:-poem_attrs}"
-  LIMIT="${LIMIT:-0}"              # 0 = no cap (full dataset)
+  LIMIT="${LIMIT:-0}"
+else
+  OUT_DIR="${OUT_DIR:-poem_attrs}"  # continue writing to the same dir
+  LIMIT="${LIMIT:-0}"               # we’ll pass --include_file instead of LIMIT
 fi
 
-SPLITS="${SPLITS:-all}"            # can be "all" or "train,validation,test"
+SPLITS="${SPLITS:-all}"             # "all" or "train,validation,test"
 MAX_CONCURRENT="${MAX_CONCURRENT:-8}"
 
 CUDA_BIND="/mnt/shared/moduleapps/eb/CUDA/12.3.0"
@@ -78,8 +78,9 @@ ulimit -n 65535 || true
 # hf token via env or file
 export HF_TOKEN="${HF_TOKEN:-$(cat "$HF_HOME/token" 2>/dev/null || echo)}"
 
-echo "[info] poetry-attrs job starting"
+echo "[info] poetry-attrs starting"
 echo "[mode] ${MODE}"
+echo "[dataset] ${DATASET_ID}"
 echo "[script] ${SCRIPT}"
 echo "[output] OUT_DIR=${OUT_DIR}"
 echo "[model] MODEL=${MODEL}"
@@ -114,32 +115,133 @@ python3 -m vllm.entrypoints.openai.api_server \
 trap 'echo "[info] stopping..."; kill $SERVER_PID 2>/dev/null || true; wait $SERVER_PID 2>/dev/null || true' EXIT
 
 echo "[server] waiting for readiness..."
+ready=0
 for ((t=1;t<=300;t++)); do
   if curl -fsS "${API}/v1/models" >/dev/null 2>&1; then
     echo "[server] ready after ${t}s"
+    ready=1
     break
   fi
   sleep 1
 done
+if [[ "$ready" != "1" ]]; then
+  echo "[fatal] vllm server did not become ready"; exit 92
+fi
 
 echo "[server] warming up..."
 curl -fsS "${API}/v1/chat/completions" -H "Content-Type: application/json" \
   -d '{"model":"'"${MODEL}"'","messages":[{"role":"user","content":"ping"}],"max_tokens":1}' >/dev/null || true
 
-echo "[poetry] starting annotation..."
 START_TS="$(date +%s)"
 
-CMD="$STDBUF python ${SCRIPT} \
-  --base_url \"${API}\" \
-  --model \"${MODEL}\" \
-  --read_timeout \"${READ_TIMEOUT}\" \
-  --out_dir \"${OUT_DIR}\" \
-  --splits \"${SPLITS}\" \
-  --max_concurrent \"${MAX_CONCURRENT}\" \
-  --limit \"${LIMIT}\""
+# ---- run annotations ----
+if [[ "$MODE" == "full" ]]; then
+  echo "[run] full dataset"
+  CMD="$STDBUF python ${SCRIPT} \
+    --dataset_id \"${DATASET_ID}\" \
+    --base_url \"${API}\" \
+    --model \"${MODEL}\" \
+    --read_timeout \"${READ_TIMEOUT}\" \
+    --out_dir \"${OUT_DIR}\" \
+    --splits \"${SPLITS}\" \
+    --max_concurrent \"${MAX_CONCURRENT}\" \
+    --limit \"${LIMIT}\""
+  echo "[cmd] $CMD"
+  eval "$CMD"
+else
+  echo "[run] missing rows only"
+  # expand splits
+  if [[ "${SPLITS}" == "all" ]]; then
+    SPLIT_LIST="train validation test"
+  else
+    IFS=',' read -r -a arr <<< "${SPLITS}"
+    SPLIT_LIST="${arr[*]}"
+  fi
 
-echo "[cmd] $CMD"
-eval "$CMD"
+  for split in ${SPLIT_LIST}; do
+    echo "[rest] preparing todo list for ${split}"
+    # compute missing list for this split into OUT_DIR/<split>/todo_missing.txt
+    python - <<'PY'
+import os, glob, json, math
+from pathlib import Path
+from datasets import load_dataset
+
+ds_id = os.environ["DATASET_ID"]
+split = os.environ["SPLIT"]
+out_dir = Path(os.environ["OUT_DIR"])
+rows_dir = out_dir / split / "rows"
+rows_dir.mkdir(parents=True, exist_ok=True)
+
+def is_filled(d):
+    def empty(v):
+        if v is None: return True
+        if isinstance(v,float) and math.isnan(v): return True
+        if isinstance(v,str) and not v.strip(): return True
+        if isinstance(v,(list,dict)) and len(v)==0: return True
+        return False
+    keys=("emotions","primary_emotion","sentiment","themes","themes_50")
+    return any(not empty(d.get(k)) for k in keys)
+
+n = len(load_dataset(ds_id, split=split))
+filled=set()
+for p in glob.glob(str(rows_dir / "*.json")):
+    try:
+        d=json.loads(open(p,encoding="utf-8").read())
+        if is_filled(d):
+            filled.add(int(d.get("row_index", Path(p).stem)))
+    except Exception:
+        pass
+
+missing=[i for i in range(n) if i not in filled]
+todo = rows_dir.parent / "todo_missing.txt"
+todo.write_text("\n".join(map(str,missing)))
+print(f"[todo_missing] split={split} total={n} filled={len(filled)} missing={len(missing)} -> {todo}")
+PY
+    # bash vars for the inline python above
+    export DATASET_ID OUT_DIR SPLIT="$split"
+
+    TODO_FILE="${OUT_DIR}/${split}/todo_missing.txt"
+    N_MISSING=$( (test -f "$TODO_FILE" && wc -l < "$TODO_FILE") || echo 0 )
+    if [[ "${N_MISSING}" -gt 0 ]]; then
+      echo "[rest] ${split}: ${N_MISSING} rows to process"
+      CMD="$STDBUF python ${SCRIPT} \
+        --dataset_id \"${DATASET_ID}\" \
+        --base_url \"${API}\" \
+        --model \"${MODEL}\" \
+        --read_timeout \"${READ_TIMEOUT}\" \
+        --out_dir \"${OUT_DIR}\" \
+        --splits \"${split}\" \
+        --include_file \"${TODO_FILE}\" \
+        --skip_filled \
+        --limit 0 \
+        --max_concurrent \"${MAX_CONCURRENT}\""
+      echo "[cmd] $CMD"
+      eval "$CMD"
+    else
+      echo "[rest] ${split}: nothing to do"
+    fi
+  done
+fi
+
+# ---- merge into parquet ----
+echo "[merge] writing merged parquet(s)"
+$STDBUF python merge_poem_attrs.py \
+  --dataset_id "${DATASET_ID}" \
+  --attrs_dir "${OUT_DIR}" \
+  --out_dir "${OUT_DIR}/merged" \
+  --splits "${SPLITS}"
+
+# ---- quick summary ----
+echo "[summary] annotated row counts:"
+python - <<'PY'
+import glob, pandas as pd, os
+out_root=os.environ.get("OUT_DIR","poem_attrs")
+root=os.path.join(out_root,"merged")
+for p in sorted(glob.glob(f"{root}/*.parquet")):
+    df=pd.read_parquet(p)
+    got=(df["emotions"].notna() | df["primary_emotion"].notna() | df["sentiment"].notna())
+    print(os.path.basename(p), "rows:", len(df), "annotated:", int(got.sum()))
+PY
 
 END_TS=$(date +%s)
 DUR=$((END_TS - START_TS))
@@ -148,6 +250,6 @@ echo ""
 echo "=== poetry attrs complete ==="
 echo "[duration] ${DUR}s"
 echo "[model] ${MODEL}"
-echo "[output] ${OUT_DIR}/"
+echo "[output dir] ${OUT_DIR}/"
 echo "[server] ${API}"
 echo "[parallel] ${MAX_CONCURRENT}"
