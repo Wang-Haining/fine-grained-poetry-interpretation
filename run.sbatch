@@ -15,9 +15,9 @@
 set -euo pipefail
 
 # usage:
-#   sbatch poetry_attrs.sbatch                          # full run
-#   VAR=rest SPLITS=train sbatch poetry_attrs.sbatch    # only missing rows for train
-#   LIMIT=500 OUT_DIR=poem_attrs_500 sbatch ...         # explicit override
+#   sbatch poetry_attrs.sbatch
+#   VAR=rest SPLITS=train sbatch poetry_attrs.sbatch    # finishes only missing rows for train
+#   TODO_FILE_OVERRIDE=missing_train_positions.txt VAR=rest SPLITS=train sbatch poetry_attrs.sbatch
 
 # ---- environment setup (tempest) ----
 module --force purge
@@ -46,7 +46,6 @@ export HTTP_KEEPALIVE="${HTTP_KEEPALIVE:-120}"
 export HTTP_POOL_TIMEOUT="${HTTP_POOL_TIMEOUT:-600}"
 
 # ---- mode selection ----
-# "full" processes everything (LIMIT=0); "rest" finishes only missing rows
 MODE="full"
 if [[ "${VAR:-}" == "rest" || "${MISSING_ONLY:-0}" == "1" ]]; then
   MODE="rest"
@@ -56,16 +55,12 @@ fi
 SCRIPT="${SCRIPT:-add_poetry_attrs.py}"
 DATASET_ID="${DATASET_ID:-haining/poem_interpretation_corpus}"
 
-if [[ "$MODE" == "full" ]]; then
-  OUT_DIR="${OUT_DIR:-poem_attrs}"
-  LIMIT="${LIMIT:-0}"
-else
-  OUT_DIR="${OUT_DIR:-poem_attrs}"  # continue writing to the same dir
-  LIMIT="${LIMIT:-0}"               # we will pass --include_file instead of LIMIT
-fi
+OUT_DIR="${OUT_DIR:-poem_attrs}"
+export OUT_DIR  # needed for the summary python block
 
 SPLITS="${SPLITS:-all}"             # "all" or "train,validation,test"
 MAX_CONCURRENT="${MAX_CONCURRENT:-8}"
+LIMIT="${LIMIT:-0}"                 # full mode only (0 => all, via your python logic)
 
 CUDA_BIND="/mnt/shared/moduleapps/eb/CUDA/12.3.0"
 export PYTHONUNBUFFERED=1
@@ -155,7 +150,7 @@ if [[ "$MODE" == "full" ]]; then
   eval "$CMD"
 else
   echo "[run] missing rows only"
-  # expand splits
+
   if [[ "${SPLITS}" == "all" ]]; then
     SPLIT_LIST="train validation test"
   else
@@ -164,62 +159,100 @@ else
   fi
 
   for split in ${SPLIT_LIST}; do
-    echo "[rest] preparing todo list for ${split}"
+    echo "[rest] split=${split}"
 
-    # compute missing list for this split into OUT_DIR/<split>/todo_missing.txt
-    python - "$DATASET_ID" "$OUT_DIR" "$split" <<'PY'
-import sys, json, math, glob
+    # prefer an existing positions include file (what you already generated)
+    TODO_FILE_OVERRIDE="${TODO_FILE_OVERRIDE:-}"
+    if [[ -n "${TODO_FILE_OVERRIDE}" ]]; then
+      TODO_FILE="${TODO_FILE_OVERRIDE}"
+    elif [[ -f "missing_${split}_positions.txt" ]]; then
+      TODO_FILE="missing_${split}_positions.txt"
+    else
+      TODO_FILE="${OUT_DIR}/${split}/todo_missing_positions.txt"
+      echo "[rest] generating ${TODO_FILE} (positions, join-aware filenames)"
+
+      python - "$DATASET_ID" "$OUT_DIR" "$split" "$TODO_FILE" <<'PY'
+import sys, json, math
 from pathlib import Path
 from datasets import load_dataset
 
-ds_id, out_dir, split = sys.argv[1], sys.argv[2], sys.argv[3]
-rows = Path(out_dir) / split / "rows"
-rows.mkdir(parents=True, exist_ok=True)
+ds_id, out_dir, split, todo_path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+todo_path = Path(todo_path)
+rows_dir = Path(out_dir) / split / "rows"
+rows_dir.mkdir(parents=True, exist_ok=True)
+todo_path.parent.mkdir(parents=True, exist_ok=True)
 
-def empty(v):
-    return v is None or (isinstance(v,float) and math.isnan(v)) or (isinstance(v,str) and not v.strip()) or (isinstance(v,(list,dict)) and not v)
+IMPORTANT_KEYS = ["emotions","primary_emotion","sentiment","themes","themes_50"]
 
-def filled(d):
-    return any(not empty(d.get(k)) for k in ("emotions","primary_emotion","sentiment","themes","themes_50"))
+def is_nonempty_payload(d: dict) -> bool:
+    def empty(v):
+        if v is None:
+            return True
+        if isinstance(v, float) and math.isnan(v):
+            return True
+        if isinstance(v, str) and v.strip() == "":
+            return True
+        if isinstance(v, (list, dict)) and len(v) == 0:
+            return True
+        return False
+    return any(not empty(d.get(k)) for k in IMPORTANT_KEYS)
 
-n = len(load_dataset(ds_id, split=split))
-seen = set()
-for p in rows.glob("*.json"):
+def is_filled_json(path: Path) -> bool:
+    if not path.exists():
+        return False
     try:
-        d = json.loads(p.read_text(encoding="utf-8"))
-        if filled(d):
-            i = int(d.get("row_index", p.stem))
-            if 0 <= i < n: seen.add(i)
+        d = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
-        pass
+        return False
+    return is_nonempty_payload(d)
 
-missing = [str(i) for i in range(n) if i not in seen]
-todo = rows.parent / "todo_missing.txt"
-todo.write_text("\n".join(missing))
-print(f"[todo_missing] split={split} total={n} filled={len(seen)} missing={len(missing)} -> {todo}")
+def detect_row_id(row: dict, fallback_idx: int) -> int:
+    for key in ("row_index", "__index_level_0__", "id"):
+        if key in row:
+            try:
+                return int(row[key])
+            except Exception:
+                pass
+    return int(fallback_idx)
+
+ds = load_dataset(ds_id, split=split)
+n = len(ds)
+
+missing_positions = []
+filled = 0
+for pos in range(n):
+    row = dict(ds[pos])
+    rid = detect_row_id(row, pos)               # filename id your annotator uses
+    out_path = rows_dir / f"{rid}.json"
+    if is_filled_json(out_path):
+        filled += 1
+    else:
+        missing_positions.append(pos)           # include_file expects positions
+
+todo_path.write_text("\n".join(map(str, missing_positions)))
+print(f"[todo_missing_positions] split={split} total={n} filled={filled} missing={len(missing_positions)} -> {todo_path}")
 PY
-
-    TODO_FILE="${OUT_DIR}/${split}/todo_missing.txt"
-    N_MISSING=$( (test -f "$TODO_FILE" && wc -l < "$TODO_FILE") || echo 0 )
-
-    if [[ "$N_MISSING" -gt 0 ]]; then
-      echo "[rest] ${split}: ${N_MISSING} rows to process"
-      CMD="$STDBUF python ${SCRIPT} \
-        --dataset_id \"${DATASET_ID}\" \
-        --base_url \"${API}\" \
-        --model \"${MODEL}\" \
-        --read_timeout \"${READ_TIMEOUT}\" \
-        --out_dir \"${OUT_DIR}\" \
-        --splits \"${split}\" \
-        --include_file \"${TODO_FILE}\" \
-        --skip_filled \
-        --limit 0 \
-        --max_concurrent \"${MAX_CONCURRENT}\""
-      echo "[cmd] $CMD"
-      eval "$CMD"
-    else
-      echo "[rest] ${split}: nothing to do"
     fi
+
+    N_MISSING=$( (test -f "$TODO_FILE" && wc -l < "$TODO_FILE") || echo 0 )
+    if [[ "$N_MISSING" -le 0 ]]; then
+      echo "[rest] ${split}: nothing to do"
+      continue
+    fi
+
+    echo "[rest] ${split}: ${N_MISSING} rows to process"
+    CMD="$STDBUF python ${SCRIPT} \
+      --dataset_id \"${DATASET_ID}\" \
+      --base_url \"${API}\" \
+      --model \"${MODEL}\" \
+      --read_timeout \"${READ_TIMEOUT}\" \
+      --out_dir \"${OUT_DIR}\" \
+      --splits \"${split}\" \
+      --include_file \"${TODO_FILE}\" \
+      --max_concurrent \"${MAX_CONCURRENT}\" \
+      --limit 0"
+    echo "[cmd] $CMD"
+    eval "$CMD"
   done
 fi
 
