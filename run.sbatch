@@ -160,6 +160,10 @@ else
 
   for split in ${SPLIT_LIST}; do
     echo "[rest] preparing todo list for ${split}"
+
+    # make sure the inline python sees these
+    export DATASET_ID OUT_DIR SPLIT="$split"
+
     # compute missing list for this split into OUT_DIR/<split>/todo_missing.txt
     python - <<'PY'
 import os, glob, json, math
@@ -186,9 +190,12 @@ n = len(load_dataset(ds_id, split=split))
 filled=set()
 for p in glob.glob(str(rows_dir / "*.json")):
     try:
-        d=json.loads(open(p,encoding="utf-8").read())
+        with open(p, encoding="utf-8") as fh:
+            d=json.load(fh)
         if is_filled(d):
-            filled.add(int(d.get("row_index", Path(p).stem)))
+            idx = int(d.get("row_index", Path(p).stem))
+            if 0 <= idx < n:
+                filled.add(idx)
     except Exception:
         pass
 
@@ -197,8 +204,6 @@ todo = rows_dir.parent / "todo_missing.txt"
 todo.write_text("\n".join(map(str,missing)))
 print(f"[todo_missing] split={split} total={n} filled={len(filled)} missing={len(missing)} -> {todo}")
 PY
-    # bash vars for the inline python above
-    export DATASET_ID OUT_DIR SPLIT="$split"
 
     TODO_FILE="${OUT_DIR}/${split}/todo_missing.txt"
     N_MISSING=$( (test -f "$TODO_FILE" && wc -l < "$TODO_FILE") || echo 0 )
@@ -211,7 +216,7 @@ PY
         --read_timeout \"${READ_TIMEOUT}\" \
         --out_dir \"${OUT_DIR}\" \
         --splits \"${split}\" \
-        --include_file \"${TODO_FILE}\" \
+        --include_file \"${TODO_FILE}}\" \
         --skip_filled \
         --limit 0 \
         --max_concurrent \"${MAX_CONCURRENT}\""
@@ -221,7 +226,7 @@ PY
       echo "[rest] ${split}: nothing to do"
     fi
   done
-fi
+
 
 # ---- merge into parquet ----
 echo "[merge] writing merged parquet(s)"
