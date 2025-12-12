@@ -61,17 +61,32 @@ def drop_and_recreate_cols(df: pd.DataFrame) -> None:
         df[c] = pd.Series([pd.NA] * len(df), dtype="object")
 
 
-def build_rowindex_to_pos(df: pd.DataFrame) -> Dict[int, int]:
-    # prefer explicit row_index if present; else fall back to enumerate index
-    if "row_index" in df.columns:
-        keys = [coerce_int(v) for v in df["row_index"].tolist()]
-    else:
-        keys = list(range(len(df)))
-    out: Dict[int, int] = {}
-    for pos, k in enumerate(keys):
-        kk = pos if k is None else int(k)
-        out[kk] = pos
-    return out
+def build_key2pos(df: pd.DataFrame) -> Dict[int, int]:
+    """
+    union mapping from multiple possible df keys to row position:
+      - enumerate index (0..N-1)
+      - 'row_index' column if present
+      - '__index_level_0__' if present
+      - 'id' column if it is all digits (coerces to int)
+    precedence: explicit columns override the enumerate key
+    """
+    n = len(df)
+    key2pos: Dict[int, int] = {i: i for i in range(n)}  # enumerate baseline
+
+    def add_series(col: str, override: bool = True):
+        if col in df.columns:
+            vals = df[col].tolist()
+            for pos, v in enumerate(vals):
+                k = coerce_int(v)
+                if k is not None and (override or k not in key2pos):
+                    key2pos[k] = pos
+
+    add_series("row_index", override=True)
+    add_series("__index_level_0__", override=True)
+    # only numeric ids are considered; hex-like strings won't coerce
+    add_series("id", override=False)
+
+    return key2pos
 
 
 def merge_split(ds_id: str, split: str, attrs_root: Path, out_root: Path) -> Path:
@@ -83,7 +98,7 @@ def merge_split(ds_id: str, split: str, attrs_root: Path, out_root: Path) -> Pat
     payloads = load_row_payloads(rows_dir)
 
     drop_and_recreate_cols(df)
-    idx2pos = build_rowindex_to_pos(df)
+    idx2pos = build_key2pos(df)
 
     matched = 0
     for ridx, d in payloads.items():
