@@ -161,7 +161,7 @@ else
   for split in ${SPLIT_LIST}; do
     echo "[rest] preparing todo list for ${split}"
 
-    # make sure the inline python sees these
+    # make env visible inside the heredoc python
     export DATASET_ID OUT_DIR SPLIT="$split"
 
     # compute missing list for this split into OUT_DIR/<split>/todo_missing.txt
@@ -170,53 +170,48 @@ import os, glob, json, math
 from pathlib import Path
 from datasets import load_dataset
 
-ds_id = os.environ["DATASET_ID"]
-split = os.environ["SPLIT"]
-out_dir = Path(os.environ["OUT_DIR"])
-rows_dir = out_dir / split / "rows"
-rows_dir.mkdir(parents=True, exist_ok=True)
+ds_id  = os.environ["DATASET_ID"]
+split  = os.environ["SPLIT"]
+outdir = Path(os.environ["OUT_DIR"])
+rows   = (outdir / split / "rows")
+rows.mkdir(parents=True, exist_ok=True)
 
+def empty(v):
+    return v is None or (isinstance(v,float) and math.isnan(v)) or (isinstance(v,str) and not v.strip()) or (isinstance(v,(list,dict)) and not v)
 def is_filled(d):
-    def empty(v):
-        if v is None: return True
-        if isinstance(v,float) and math.isnan(v): return True
-        if isinstance(v,str) and not v.strip(): return True
-        if isinstance(v,(list,dict)) and len(v)==0: return True
-        return False
-    keys=("emotions","primary_emotion","sentiment","themes","themes_50")
-    return any(not empty(d.get(k)) for k in keys)
+    return any(not empty(d.get(k)) for k in ("emotions","primary_emotion","sentiment","themes","themes_50"))
 
 n = len(load_dataset(ds_id, split=split))
-filled=set()
-for p in glob.glob(str(rows_dir / "*.json")):
+filled = set()
+for p in rows.glob("*.json"):
     try:
-        with open(p, encoding="utf-8") as fh:
-            d=json.load(fh)
+        d = json.loads(p.read_text(encoding="utf-8"))
         if is_filled(d):
-            idx = int(d.get("row_index", Path(p).stem))
+            idx = int(d.get("row_index", p.stem))
             if 0 <= idx < n:
                 filled.add(idx)
     except Exception:
         pass
 
-missing=[i for i in range(n) if i not in filled]
-todo = rows_dir.parent / "todo_missing.txt"
-todo.write_text("\n".join(map(str,missing)))
+missing = [str(i) for i in range(n) if i not in filled]
+todo = rows.parent / "todo_missing.txt"
+todo.write_text("\n".join(missing))
 print(f"[todo_missing] split={split} total={n} filled={len(filled)} missing={len(missing)} -> {todo}")
 PY
 
     TODO_FILE="${OUT_DIR}/${split}/todo_missing.txt"
     N_MISSING=$( (test -f "$TODO_FILE" && wc -l < "$TODO_FILE") || echo 0 )
-    if [[ "${N_MISSING}" -gt 0 ]]; then
+
+    if [[ "$N_MISSING" -gt 0 ]]; then
       echo "[rest] ${split}: ${N_MISSING} rows to process"
       CMD="$STDBUF python ${SCRIPT} \
         --dataset_id \"${DATASET_ID}\" \
         --base_url \"${API}\" \
-        --model \"${MODEL}\" \
+        --model \"${MODEL}}\" \
         --read_timeout \"${READ_TIMEOUT}\" \
         --out_dir \"${OUT_DIR}\" \
         --splits \"${split}\" \
-        --include_file \"${TODO_FILE}}\" \
+        --include_file \"${TODO_FILE}\" \
         --skip_filled \
         --limit 0 \
         --max_concurrent \"${MAX_CONCURRENT}\""
