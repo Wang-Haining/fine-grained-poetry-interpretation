@@ -487,12 +487,20 @@ async def run_all(args: argparse.Namespace) -> None:
         ds = ds_dict[split]
         n_total = len(ds)
 
-        all_indices = list(range(n_total))
-        if args.random_sample and args.limit and args.limit > 0:
-            random.seed(args.seed)
-            candidate_indices = random.sample(all_indices, k=min(args.limit, n_total))
+        # candidate set
+        if args.include_file:
+            with open(args.include_file) as f:
+                include = [int(x.strip()) for x in f if x.strip()]
+            candidate_indices = [i for i in include if 0 <= i < n_total]
         else:
-            candidate_indices = all_indices[: (args.limit or n_total)]
+            all_indices = list(range(n_total))
+            if args.random_sample and args.limit and args.limit > 0:
+                random.seed(args.seed)
+                candidate_indices = random.sample(
+                    all_indices, k=min(args.limit, n_total)
+                )
+            else:
+                candidate_indices = all_indices[: (args.limit or n_total)]
 
         if args.skip_filled:
             before = len(candidate_indices)
@@ -542,6 +550,13 @@ def build_cli() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser()
     ap.add_argument(
         "--dataset_id", type=str, default="haining/poem_interpretation_corpus"
+    )
+    ap.add_argument(
+        "--include_file",
+        type=str,
+        default=None,
+        help="newline-separated row indices to process (for the active splits). "
+        "If set, overrides --limit/random logic; still honors --skip_filled.",
     )
     ap.add_argument("--base_url", type=str, required=True)
     ap.add_argument("--model", type=str, default="openai/gpt-oss-120b")
