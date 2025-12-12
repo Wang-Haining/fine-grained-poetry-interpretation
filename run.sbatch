@@ -20,7 +20,7 @@ set -euo pipefail
 #   LIMIT=500 OUT_DIR=poem_attrs_500 sbatch ...         # explicit override
 
 # ---- environment setup (tempest) ----
-module purge
+module --force purge
 module unload Python CUDA 2>/dev/null || true
 module load OpenSSL/3 Python/3.12.3-GCCcore-13.3.0 CUDA/12.3.0
 source .venv/bin/activate
@@ -61,7 +61,7 @@ if [[ "$MODE" == "full" ]]; then
   LIMIT="${LIMIT:-0}"
 else
   OUT_DIR="${OUT_DIR:-poem_attrs}"  # continue writing to the same dir
-  LIMIT="${LIMIT:-0}"               # we’ll pass --include_file instead of LIMIT
+  LIMIT="${LIMIT:-0}"               # we will pass --include_file instead of LIMIT
 fi
 
 SPLITS="${SPLITS:-all}"             # "all" or "train,validation,test"
@@ -112,7 +112,12 @@ python3 -m vllm.entrypoints.openai.api_server \
   --host 0.0.0.0 --port ${PORT}
 " & SERVER_PID=$!
 
-trap 'echo "[info] stopping..."; kill $SERVER_PID 2>/dev/null || true; wait $SERVER_PID 2>/dev/null || true' EXIT
+cleanup() {
+  echo "[info] stopping..."
+  kill "$SERVER_PID" 2>/dev/null || true
+  wait "$SERVER_PID" 2>/dev/null || true
+}
+trap cleanup EXIT
 
 echo "[server] waiting for readiness..."
 ready=0
@@ -161,42 +166,37 @@ else
   for split in ${SPLIT_LIST}; do
     echo "[rest] preparing todo list for ${split}"
 
-    # make env visible inside the heredoc python
-    export DATASET_ID OUT_DIR SPLIT="$split"
-
     # compute missing list for this split into OUT_DIR/<split>/todo_missing.txt
-    python - <<'PY'
-import os, glob, json, math
+    python - "$DATASET_ID" "$OUT_DIR" "$split" <<'PY'
+import sys, json, math, glob
 from pathlib import Path
 from datasets import load_dataset
 
-ds_id  = os.environ["DATASET_ID"]
-split  = os.environ["SPLIT"]
-outdir = Path(os.environ["OUT_DIR"])
-rows   = (outdir / split / "rows")
+ds_id, out_dir, split = sys.argv[1], sys.argv[2], sys.argv[3]
+rows = Path(out_dir) / split / "rows"
 rows.mkdir(parents=True, exist_ok=True)
 
 def empty(v):
     return v is None or (isinstance(v,float) and math.isnan(v)) or (isinstance(v,str) and not v.strip()) or (isinstance(v,(list,dict)) and not v)
-def is_filled(d):
+
+def filled(d):
     return any(not empty(d.get(k)) for k in ("emotions","primary_emotion","sentiment","themes","themes_50"))
 
 n = len(load_dataset(ds_id, split=split))
-filled = set()
+seen = set()
 for p in rows.glob("*.json"):
     try:
         d = json.loads(p.read_text(encoding="utf-8"))
-        if is_filled(d):
-            idx = int(d.get("row_index", p.stem))
-            if 0 <= idx < n:
-                filled.add(idx)
+        if filled(d):
+            i = int(d.get("row_index", p.stem))
+            if 0 <= i < n: seen.add(i)
     except Exception:
         pass
 
-missing = [str(i) for i in range(n) if i not in filled]
+missing = [str(i) for i in range(n) if i not in seen]
 todo = rows.parent / "todo_missing.txt"
 todo.write_text("\n".join(missing))
-print(f"[todo_missing] split={split} total={n} filled={len(filled)} missing={len(missing)} -> {todo}")
+print(f"[todo_missing] split={split} total={n} filled={len(seen)} missing={len(missing)} -> {todo}")
 PY
 
     TODO_FILE="${OUT_DIR}/${split}/todo_missing.txt"
@@ -207,7 +207,7 @@ PY
       CMD="$STDBUF python ${SCRIPT} \
         --dataset_id \"${DATASET_ID}\" \
         --base_url \"${API}\" \
-        --model \"${MODEL}}\" \
+        --model \"${MODEL}\" \
         --read_timeout \"${READ_TIMEOUT}\" \
         --out_dir \"${OUT_DIR}\" \
         --splits \"${split}\" \
@@ -221,15 +221,19 @@ PY
       echo "[rest] ${split}: nothing to do"
     fi
   done
-
+fi
 
 # ---- merge into parquet ----
 echo "[merge] writing merged parquet(s)"
+MERGE_SPLITS="${SPLITS}"
+if [[ "${MERGE_SPLITS}" == "all" ]]; then
+  MERGE_SPLITS="train,validation,test"
+fi
 $STDBUF python merge_poem_attrs.py \
   --dataset_id "${DATASET_ID}" \
   --attrs_dir "${OUT_DIR}" \
   --out_dir "${OUT_DIR}/merged" \
-  --splits "${SPLITS}"
+  --splits "${MERGE_SPLITS}"
 
 # ---- quick summary ----
 echo "[summary] annotated row counts:"
