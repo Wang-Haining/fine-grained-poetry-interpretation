@@ -1,39 +1,47 @@
-# upload_structured_corpus_masked.py
+from pathlib import Path
+
 import pandas as pd
 from datasets import Dataset, DatasetDict
 from huggingface_hub import HfApi, HfFolder
 
-DATA_PARQUET = "dist_v1/merged_v1.parquet"  # final local parquet
-REPO_NAME = "structured_poem_interpretation_corpus"  # HF dataset repo name
+# local v2 artifacts (written by merge_poem_attrs.py)
+DATA_DIR = (
+    "poem_attrs/merged"  # expects train.parquet / validation.parquet / test.parquet
+)
+
+# target hf dataset repo
+REPO_ID = "haining/structured_poem_interpretation_corpus_v2"
 
 
-def build_masked_dataset(parquet_path: str) -> DatasetDict:
-    df = pd.read_parquet(parquet_path)
+def build_masked_dataset(data_dir: str) -> DatasetDict:
+    dsd = DatasetDict()
+    root = Path(data_dir)
 
-    # mask PF text in-place
-    is_pf = df["source"].eq("poetry_foundation")
-    for col in ("poem", "interpretation"):
-        if col in df.columns:
-            df.loc[is_pf, col] = None  # null out PF content
+    for split in ("train", "validation", "test"):
+        p = root / f"{split}.parquet"
+        if not p.exists():
+            continue
 
-    # split to DatasetDict without filtering overhead
-    splits = [
-        s for s in ("train", "validation", "test") if s in set(df["split"].unique())
-    ]
-    dsd = DatasetDict(
-        {
-            s: Dataset.from_pandas(
-                df[df["split"].eq(s)].reset_index(drop=True), preserve_index=False
-            )
-            for s in splits
-        }
-    )
+        df = pd.read_parquet(p)
+
+        # mask poetry foundation text in-place
+        if "source" in df.columns:
+            is_pf = df["source"].eq("poetry_foundation")
+            for col in ("poem", "interpretation"):
+                if col in df.columns:
+                    df.loc[is_pf, col] = None
+
+        dsd[split] = Dataset.from_pandas(
+            df.reset_index(drop=True),
+            preserve_index=False,
+        )
+
     return dsd
 
 
-def main():
+def main() -> None:
     print("building masked DatasetDict…")
-    dsd = build_masked_dataset(DATA_PARQUET)
+    dsd = build_masked_dataset(DATA_DIR)
     print({k: len(v) for k, v in dsd.items()})
 
     token = HfFolder.get_token()
@@ -41,26 +49,25 @@ def main():
         raise RuntimeError(
             "no HF token found. run `huggingface-cli login` or set HUGGINGFACE_HUB_TOKEN"
         )
-    api = HfApi(token=token)
-    user = api.whoami(token=token)
-    username = user["name"]
-    repo_id = f"{username}/{REPO_NAME}"
-    print(f"authenticated as {username}")
 
-    # create **public** dataset repo
-    api.create_repo(repo_id=repo_id, repo_type="dataset", private=False, exist_ok=True)
-    print(f"repo ready: https://huggingface.co/datasets/{repo_id}")
+    api = HfApi(token=token)
+    api.create_repo(
+        repo_id=REPO_ID,
+        repo_type="dataset",
+        private=False,
+        exist_ok=True,
+    )
+    print(f"repo ready: https://huggingface.co/datasets/{REPO_ID}")
 
     print("pushing masked dataset to hub…")
     dsd.push_to_hub(
-        repo_id=repo_id,
+        repo_id=REPO_ID,
         token=token,
-        commit_message="public v1: mask PF poem/interpretation with null",
+        commit_message="public v2: add emotions/sentiment/themes; mask PF poem/interpretation with null",
     )
 
-    # dataset card notes masking-by-nulls
     CARD = """---
-pretty_name: Structured Poem Interpretation Corpus (v1, PF text masked)
+pretty_name: Structured Poem Interpretation Corpus (v2, PF text masked)
 license: cc-by-4.0
 language:
 - en
@@ -85,10 +92,10 @@ entries (`source == "public_domain_poetry"`) include full text. All categorical 
     api.upload_file(
         path_or_fileobj=CARD.encode("utf-8"),
         path_in_repo="README.md",
-        repo_id=repo_id,
+        repo_id=REPO_ID,
         repo_type="dataset",
     )
-    print(f"done. view at https://huggingface.co/datasets/{repo_id}")
+    print(f"done. view at https://huggingface.co/datasets/{REPO_ID}")
 
 
 if __name__ == "__main__":
