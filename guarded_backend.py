@@ -174,12 +174,15 @@ class GuardedBackend:
                     f"no valid json in response: {raw[:200] if raw else 'empty'}"
                 )
 
-                # on later attempts, use minimal fallback prompt
+                # on later attempts, use minimal fallback prompt (must satisfy response_model)
                 if attempt >= 3:
                     current_messages = [
                         {
                             "role": "user",
-                            "content": 'output this JSON: {"emotions":["sadness"],"sentiment":"neutral","themes":[]}',
+                            "content": (
+                                "output this JSON: "
+                                '{"emotions":["sadness"],"sentiment":"neutral","themes":[],"themes_50":[]}'
+                            ),
                         }
                     ]
                 else:
