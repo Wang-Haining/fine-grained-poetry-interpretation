@@ -1,7 +1,7 @@
 # Poetry Interpretation Corpus
 
 A large-scale corpus of poems paired with structured interpretations, created for computational analysis of poetic 
-meaning and literary interpretation in the digital humanities.
+meaning and literary interpretation in the digital humanities. I'm testing the link. 
 
 ## Overview
 
