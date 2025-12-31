@@ -1,0 +1,7 @@
+split,source,rows
+train,public_domain_poetry,33820
+train,poetry_foundation,12400
+validation,public_domain_poetry,1875
+validation,poetry_foundation,693
+test,public_domain_poetry,1859
+test,poetry_foundation,709
