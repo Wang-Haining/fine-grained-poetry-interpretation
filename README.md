@@ -1,115 +1,105 @@
-# Poetry Interpretation Corpus
+# Structured Poem Interpretation Corpus
 
-A large-scale corpus of poems paired with structured interpretations, created for computational analysis of poetic 
-meaning and literary interpretation in the digital humanities.
+A large-scale corpus of English poems paired with structured, machine-generated interpretations and categorical tags for computational literary studies and NLP.
 
-## Overview
+* **Total rows:** 51,356
+* **Splits:** train 46,220 | validation 2,568 | test 2,568
+* **Sources:** 37,554 public-domain poems and 13,802 Poetry Foundation poems (text masked)
 
-This corpus combines two major public poetry datasets and augments them with AI-generated structured interpretations 
-using ChatGPT. The resulting dataset enables research at the intersection of computational linguistics, literary 
-studies, and artificial intelligence, particularly for tasks such as:
+This repository also includes:
 
-- Poetry understanding and analysis
-- Interpretive text generation
-- Literary meaning extraction
-- Cross-referencing human and machine interpretation of poetry
-- Training and evaluating language models on literary analysis
+* **Sample data:** `data/sample.csv` (easy-to-read subset)
+* **Basic statistics:** `stats/readme_stats.md` (split sizes, masking rates, label summaries)
 
-## Source Corpora
+## What is in the dataset
 
-### 1. Poetry Foundation Corpus
-- **Source**: [Poetry Foundation Poems Dataset](https://www.kaggle.com/datasets/tgdivy/poetry-foundation-poems/data)
-- **Size**: 13,854 poems
-- **Description**: High-quality contemporary and historical poetry from Poetry Foundation's extensive digital archive
-- **Coverage**: Wide range of poets, styles, and historical periods
+Each row corresponds to a poem record. For public-domain items, we provide the full poem text and a structured interpretation. For Poetry Foundation items, we provide metadata and categorical tags, but the poem text and interpretation are masked (see the masking policy below).
 
-### 2. Public Domain Poetry Corpus
-- **Source**: [Public Domain Poetry Dataset](https://huggingface.co/datasets/DanFosing/public-domain-poetry)
-- **Size**: 38,499 poems
-- **Description**: Poems in the public domain, representing classical and historical poetry
-- **Coverage**: Predominantly works published before copyright restrictions
+### Source corpora
 
-### Combined Dataset Statistics
-- **Total unique entries**: 51,356 poems
-- **Fixed splits**: 90% train / 5% validation / 5% test
+1. **Public Domain Poetry**
 
-## Methodology
+* Source: `DanFosing/public-domain-poetry` (Hugging Face)
+* Rows in this release: **37,554**
 
-### Data Collection and Integration
-1. **Source Integration**: Combined Poetry Foundation and Public Domain Poetry datasets
-2. **Deduplication**: Removed duplicate entries based on matching author and title fields
-3. **Quality Control**: Preserved original metadata and text formatting
+2. **Poetry Foundation**
 
-### Interpretation Generation
-Structured interpretations were generated using ChatGPT (`gpt-4o-2024-05-13`) through a systematic prompting approach:
+* Source: Poetry Foundation poem metadata (via a public dataset mirror)
+* Rows in this release: **13,802**
 
-1. **Prompt Design**: Carefully crafted prompts to elicit structured literary analysis
-2. **Processing Pipeline**: Automated batch processing of poems through the OpenAI API
-3. **Interpretation Structure**: Each interpretation includes:
-   - Thematic analysis
-   - Literary device identification
-   - Historical/cultural context
-   - Emotional tone and mood
-   - Structural observations
+### Masking policy (Poetry Foundation)
 
-## Dataset Structure
+For rows where `source == "poetry_foundation"`, the `poem` and `interpretation` fields are set to `null` in this release to respect content licensing. All categorical annotations and metadata remain available.
 
-Each entry in the corpus contains the following fields:
+Users who have independent access to the Poetry Foundation text can recover poem content by using `author` and `title` to locate the poem on poetryfoundation.org.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `author` | string | Name of the poem's author |
-| `title` | string | Title of the poem |
-| `poem` | string | Full text of the poem |
-| `interpretation` | string | AI-generated structured interpretation |
-| `source` | string | Origin dataset identifier (`poetry_foundation` or `public_domain_poetry`) |
+## Fields
+
+| Field             | Type           | Description                                                                          |
+| ----------------- | -------------- | ------------------------------------------------------------------------------------ |
+| `author`          | string         | Poet name.                                                                           |
+| `title`           | string         | Poem title.                                                                          |
+| `poem`            | string or null | Full poem text (null for Poetry Foundation rows).                                    |
+| `interpretation`  | string or null | Machine-generated interpretation (null for Poetry Foundation rows).                  |
+| `source`          | string         | `public_domain_poetry` or `poetry_foundation`.                                       |
+| `emotions`        | list[string]   | 1–3 labels from {anger, anticipation, disgust, fear, joy, sadness, surprise, trust}. |
+| `primary_emotion` | string         | The first item of `emotions`.                                                        |
+| `sentiment`       | string         | One of {positive, neutral, negative}.                                                |
+| `themes`          | list[string]   | Open-vocabulary themes (0–5 concise tags, 1–3 words each).                           |
+| `themes_50`       | list[string]   | Themes chosen from a fixed 50-item lexicon (typically up to 5).                      |
+
+### Fixed 50-theme lexicon
+
+`themes_50` uses the following fixed set (lowercased):
+
+```text
+nature, body, death, love, existential, identity, self, beauty, america,
+loss, animals, history, memories, family, writing, ancestry, thought,
+landscapes, war, time, religion, grief, violence, aging, childhood, desire,
+night, mothers, language, birds, social justice, music, flowers, politics,
+hope, heartache, fathers, gender, environment, spirituality, loneliness,
+oceans, dreams, survival, cities, earth, despair, anxiety, weather, illness,
+home
+```
+
+## How the annotations were produced (high level)
+
+* **Interpretations:** generated offline via structured prompting.
+* **Categorical tags:** produced with a guardrailed LLM pipeline that enforces a strict JSON schema, followed by normalization (lowercasing, deduplication, and length limits).
+
+The goal is to support both open-ended analysis (`themes`) and controlled-category evaluation (`emotions`, `sentiment`, `themes_50`).
+
+## Quick dataset statistics
+
+The following files are generated for reviewer-friendly inspection:
+
+* `stats/readme_stats.md`: split sizes by source, masking rates, public-domain text length summaries, and label distribution tables.
+* `data/sample.csv`: a small, human-readable subset of rows from all splits. Poetry Foundation rows have `poem` and `interpretation` masked.
 
 ## Usage
 
-### Loading the Dataset
+### Load from Hugging Face
 
 ```python
 from datasets import load_dataset
 
-ds = load_dataset("haining/structured_poem_interpretation_corpus")
+dsd = load_dataset("haining/structured_poem_interpretation_corpus")
+train = dsd["train"]
+
+# public-domain rows with full text
+pd_train = train.filter(lambda r: r["source"] == "public_domain_poetry")
+
+# Poetry Foundation rows (text masked, annotations available)
+pf_train = train.filter(lambda r: r["source"] == "poetry_foundation")
 ```
 
-## Research Applications
+[//]: # (## Citation)
 
-This corpus enables several research directions:
-
-### 1. Computational Literary Analysis
-- Automated poetry interpretation systems
-- Comparative analysis of interpretive approaches (human vs. machine)
-- Pattern recognition in literary analysis
-- Evaluating AI's capacity for literary understanding
-- Human-AI collaboration in literary criticism
-- Benchmarking language models on interpretive tasks
-
-## Limitations and Considerations
-
-### AI-Generated Interpretations
-- Interpretations are generated by AI and may not capture the full depth of human literary analysis
-- Should be used as a starting point or complement to, not replacement for, expert literary criticism
-- May reflect biases present in the training data of the generation model
-
-### Dataset Composition
-- Predominantly English-language poetry
-- Historical bias toward Western literary traditions
-- Potential copyright considerations for more recent works
-
-### Quality Variability
-- Interpretation quality may vary across poems of different styles and complexity
-- Obscure or highly experimental poems may receive less accurate interpretations
-
-## Citation
-
-If you use this corpus in your research, please cite:
-
-```bibtex
-[TBD]
-```
+[//]: # ()
+[//]: # (TBD)
 
 ## License
 
-Public domain
+* Public-domain poem text is included where permitted.
+* Poetry Foundation text is masked in this release.
+* Annotations and derived metadata are released under the MIT license.
