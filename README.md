@@ -4,16 +4,11 @@ A large-scale corpus of English poems paired with structured, machine-generated 
 
 * **Total rows:** 51,356
 * **Splits:** train 46,220 | validation 2,568 | test 2,568
-* **Sources:** 37,554 public-domain poems and 13,802 Poetry Foundation poems (text masked)
-
-This repository also includes:
-
-* **Sample data:** `data/sample.csv` (easy-to-read subset)
-* **Basic statistics:** `stats/readme_stats.md` (split sizes, masking rates, label summaries)
+* **Sources:** 37,554 public-domain poems and 13,802 Poetry Foundation poems (poem text masked)
 
 ## What is in the dataset
 
-Each row corresponds to a poem record. For public-domain items, we provide the full poem text and a structured interpretation. For Poetry Foundation items, we provide metadata and categorical tags, but the poem text and interpretation are masked (see the masking policy below).
+Each row corresponds to a poem record. For public-domain items, we provide the full poem text and a structured interpretation. For Poetry Foundation items, we provide metadata, categorical tags, and a machine-generated interpretation, but the poem text is masked (see the masking policy below).
 
 ### Source corpora
 
@@ -29,7 +24,7 @@ Each row corresponds to a poem record. For public-domain items, we provide the f
 
 ### Masking policy (Poetry Foundation)
 
-For rows where `source == "poetry_foundation"`, the `poem` and `interpretation` fields are set to `null` in this release to respect content licensing. All categorical annotations and metadata remain available.
+For rows where `source == "poetry_foundation"`, the `poem` field is set to `null` in this release to respect content licensing. The `interpretation` field (machine-generated) and all categorical annotations and metadata remain available.
 
 Users who have independent access to the Poetry Foundation text can recover poem content by using `author` and `title` to locate the poem on poetryfoundation.org.
 
@@ -40,7 +35,7 @@ Users who have independent access to the Poetry Foundation text can recover poem
 | `author`          | string         | Poet name.                                                                           |
 | `title`           | string         | Poem title.                                                                          |
 | `poem`            | string or null | Full poem text (null for Poetry Foundation rows).                                    |
-| `interpretation`  | string or null | Machine-generated interpretation (null for Poetry Foundation rows).                  |
+| `interpretation`  | string or null | Machine-generated interpretation (available even when the poem text is masked).      |
 | `source`          | string         | `public_domain_poetry` or `poetry_foundation`.                                       |
 | `emotions`        | list[string]   | 1–3 labels from {anger, anticipation, disgust, fear, joy, sadness, surprise, trust}. |
 | `primary_emotion` | string         | The first item of `emotions`.                                                        |
@@ -64,7 +59,7 @@ home
 
 ## How the annotations were produced (high level)
 
-* **Interpretations:** generated offline via structured prompting.
+* **Interpretations:** generated via the OpenAI API (chat completions) using `gpt-4o-2024-05-13` and a fixed markdown prompt template.
 * **Categorical tags:** produced with a guardrailed LLM pipeline that enforces a strict JSON schema, followed by normalization (lowercasing, deduplication, and length limits).
 
 The goal is to support both open-ended analysis (`themes`) and controlled-category evaluation (`emotions`, `sentiment`, `themes_50`).
@@ -74,7 +69,7 @@ The goal is to support both open-ended analysis (`themes`) and controlled-catego
 The following files are generated for reviewer-friendly inspection:
 
 * `stats/readme_stats.md`: split sizes by source, masking rates, public-domain text length summaries, and label distribution tables.
-* `data/sample.csv`: a small, human-readable subset of rows from all splits. Poetry Foundation rows have `poem` and `interpretation` masked.
+* `data/sample.csv`: a small, human-readable subset of rows from all splits. Poetry Foundation rows have `poem` masked.
 
 ## Usage
 
@@ -89,17 +84,14 @@ train = dsd["train"]
 # public-domain rows with full text
 pd_train = train.filter(lambda r: r["source"] == "public_domain_poetry")
 
-# Poetry Foundation rows (text masked, annotations available)
+# Poetry Foundation rows (text masked, labels available)
 pf_train = train.filter(lambda r: r["source"] == "poetry_foundation")
 ```
 
-[//]: # (## Citation)
+## Citation
 
-[//]: # ()
-[//]: # (TBD)
+If you use this dataset, please cite the associated paper (to be added). A BibTeX entry will be provided here.
 
 ## License
 
-* Public-domain poem text is included where permitted.
-* Poetry Foundation text is masked in this release.
-* Annotations and derived metadata are released under the MIT license.
+Code, interpretations, and annotations are released under the MIT license.
