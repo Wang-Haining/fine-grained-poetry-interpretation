@@ -1,15 +1,15 @@
 """
-restore_pf_interpretations_and_make_two_local_versions.py
+restore_pf_from_stale_revision.py
 
-goal
-- keep the now-canonical dataset as the base (themes_50, etc)
-- restore poetry foundation interpretations (and optionally poem text for internal use)
-  from the stale dataset
-- write two local versions:
-  1) internal_full: poetry_foundation poem + interpretation retained
-  2) public_masked: poetry_foundation poem masked (null), interpretation retained
+creates two local datasets from the now-canonical corpus by restoring Poetry Foundation
+interpretations (and optionally PF poem text for internal use) from an older revision
+of the stale dataset.
 
-assumes you renamed:
+outputs:
+- internal_full/data/{train,validation,test}-00000-of-00001.parquet
+- public_masked/data/{train,validation,test}-00000-of-00001.parquet
+
+defaults assume:
 - canonical: haining/structured_poem_interpretation_corpus
 - stale:     haining/structured_poem_interpretation_corpus_stale
 """
@@ -25,8 +25,9 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
+import pyarrow.parquet as pq
 from datasets import DatasetDict, load_dataset
-from huggingface_hub import login, snapshot_download
+from huggingface_hub import HfApi, hf_hub_download, login, snapshot_download
 from tqdm.auto import tqdm
 
 
@@ -35,30 +36,8 @@ def try_login() -> None:
     if token:
         login(token=token)
     else:
-        # for public datasets, auth is not required
-        # for private datasets, this will prompt interactively
-        try:
-            login()
-        except Exception:
-            pass
-
-
-def load_dataset_with_fallback(repo_id: str) -> DatasetDict:
-    # try normal loading first
-    try:
-        return load_dataset(repo_id)
-    except Exception:
-        # fallback: load the parquet files directly from a snapshot
-        snap_dir = snapshot_download(repo_id=repo_id, repo_type="dataset")
-        data_dir = Path(snap_dir) / "data"
-        data_files: Dict[str, str] = {}
-        for split in ["train", "validation", "test"]:
-            files = sorted(data_dir.glob(f"{split}-*.parquet"))
-            if files:
-                data_files[split] = str(files[0])
-        if not data_files:
-            raise RuntimeError(f"could not find parquet files in {repo_id} snapshot")
-        return load_dataset("parquet", data_files=data_files)
+        # for private datasets, this prompts
+        login()
 
 
 def norm_text(s: Optional[str]) -> str:
@@ -83,74 +62,154 @@ def is_missing_text(x: Any) -> bool:
     return s == ""
 
 
-def build_pf_map(
-    stale: DatasetDict,
-) -> Tuple[Dict[str, Dict[str, Optional[str]]], Dict[str, int]]:
-    # map key -> {"poem": ..., "interpretation": ...} from poetry_foundation rows
-    mapping: Dict[str, Dict[str, Optional[str]]] = {}
-    stats = {
-        "pf_rows_seen": 0,
-        "pf_rows_with_poem": 0,
-        "pf_rows_with_interpretation": 0,
-        "key_conflicts": 0,
-        "key_duplicates": 0,
-    }
+def load_dataset_with_fallback(
+    repo_id: str, revision: Optional[str] = None
+) -> DatasetDict:
+    # prefer standard loading if possible
+    try:
+        return (
+            load_dataset(repo_id, revision=revision)
+            if revision
+            else load_dataset(repo_id)
+        )
+    except Exception:
+        # fallback: load parquets from a snapshot
+        snap_dir = snapshot_download(
+            repo_id=repo_id, repo_type="dataset", revision=revision
+        )
+        data_dir = Path(snap_dir) / "data"
+        data_files: Dict[str, str] = {}
+        for split in ["train", "validation", "test"]:
+            files = sorted(data_dir.glob(f"{split}-*.parquet"))
+            if files:
+                data_files[split] = str(files[0])
+        if not data_files:
+            raise RuntimeError(
+                f"no parquet files found in snapshot for {repo_id}@{revision}"
+            )
+        return load_dataset("parquet", data_files=data_files)
 
-    for split in stale.keys():
-        for row in tqdm(stale[split], desc=f"index stale:{split}"):
+
+def probe_pf_counts_from_parquet(parquet_path: str) -> Tuple[int, int, int]:
+    """
+    return (pf_total, pf_poem_nonempty, pf_interp_nonempty) for a single parquet file.
+    """
+    table = pq.read_table(parquet_path, columns=["source", "poem", "interpretation"])
+    src = table["source"].to_pylist()
+    poem = table["poem"].to_pylist()
+    interp = table["interpretation"].to_pylist()
+
+    pf_total = 0
+    pf_poem_nonempty = 0
+    pf_interp_nonempty = 0
+    for s, p, it in zip(src, poem, interp):
+        if s != "poetry_foundation":
+            continue
+        pf_total += 1
+        if not is_missing_text(p):
+            pf_poem_nonempty += 1
+        if not is_missing_text(it):
+            pf_interp_nonempty += 1
+    return pf_total, pf_poem_nonempty, pf_interp_nonempty
+
+
+def find_best_stale_revision(
+    repo_id: str,
+    *,
+    prefer_poem: bool,
+    max_commits: int,
+    probe_split: str,
+) -> Optional[str]:
+    """
+    scans stale repo commits newest->oldest, probes a small parquet file, and returns
+    the first revision with PF interpretation available (and PF poem if prefer_poem).
+    """
+    api = HfApi()
+    commits = api.list_repo_commits(repo_id=repo_id, repo_type="dataset")
+    commits = commits[:max_commits]
+
+    for c in commits:
+        rev = (
+            getattr(c, "commit_id", None)
+            or getattr(c, "oid", None)
+            or getattr(c, "sha", None)
+        )
+        if not rev:
+            continue
+
+        # download just one split parquet for probing (smallest is validation/test usually)
+        # we try preferred split first; fallback to any available parquet in that revision.
+        try:
+            snap = snapshot_download(
+                repo_id=repo_id,
+                repo_type="dataset",
+                revision=rev,
+                allow_patterns=[f"data/{probe_split}-*.parquet"],
+            )
+            data_dir = Path(snap) / "data"
+            files = sorted(data_dir.glob(f"{probe_split}-*.parquet"))
+            if not files:
+                continue
+            probe_file = str(files[0])
+        except Exception:
+            continue
+
+        pf_total, pf_poem_nonempty, pf_interp_nonempty = probe_pf_counts_from_parquet(
+            probe_file
+        )
+
+        # we care about PF interpretation existing
+        if pf_interp_nonempty <= 0:
+            continue
+        if prefer_poem and pf_poem_nonempty <= 0:
+            continue
+
+        print(
+            f"picked stale revision {rev} based on {probe_split} probe: "
+            f"pf_total={pf_total}, pf_poem_nonempty={pf_poem_nonempty}, pf_interp_nonempty={pf_interp_nonempty}"
+        )
+        return rev
+
+    return None
+
+
+def build_pf_map(source: DatasetDict) -> Dict[str, Dict[str, Optional[str]]]:
+    """
+    key -> {"poem": str|None, "interpretation": str|None} for PF rows only.
+    keeps the longer value on duplicates.
+    """
+    mapping: Dict[str, Dict[str, Optional[str]]] = {}
+
+    for split in source.keys():
+        for row in tqdm(source[split], desc=f"index source:{split}"):
             if row.get("source") != "poetry_foundation":
                 continue
 
-            stats["pf_rows_seen"] += 1
-            poem = row.get("poem")
-            interp = row.get("interpretation")
-
-            if not is_missing_text(poem):
-                stats["pf_rows_with_poem"] += 1
-            if not is_missing_text(interp):
-                stats["pf_rows_with_interpretation"] += 1
-
             k = make_key(row.get("author"), row.get("title"), row.get("source"))
-            rec = {"poem": None, "interpretation": None}
-            if not is_missing_text(poem):
-                rec["poem"] = str(poem)
-            if not is_missing_text(interp):
-                rec["interpretation"] = str(interp)
+
+            poem = None if is_missing_text(row.get("poem")) else str(row.get("poem"))
+            interp = (
+                None
+                if is_missing_text(row.get("interpretation"))
+                else str(row.get("interpretation"))
+            )
 
             if k not in mapping:
-                mapping[k] = rec
+                mapping[k] = {"poem": poem, "interpretation": interp}
                 continue
 
-            stats["key_duplicates"] += 1
-            existing = mapping[k]
-
-            # conflict bookkeeping (different non-empty values)
-            if (
-                existing.get("poem")
-                and rec.get("poem")
-                and existing["poem"] != rec["poem"]
-            ) or (
-                existing.get("interpretation")
-                and rec.get("interpretation")
-                and existing["interpretation"] != rec["interpretation"]
+            # keep longer non-empty
+            if poem and (
+                not mapping[k].get("poem") or len(poem) > len(mapping[k]["poem"] or "")
             ):
-                stats["key_conflicts"] += 1
-
-            # keep the longer poem/interpretation when both exist
-            if rec.get("poem") and (
-                not existing.get("poem")
-                or len(rec["poem"]) > len(existing["poem"] or "")
+                mapping[k]["poem"] = poem
+            if interp and (
+                not mapping[k].get("interpretation")
+                or len(interp) > len(mapping[k]["interpretation"] or "")
             ):
-                existing["poem"] = rec["poem"]
-            if rec.get("interpretation") and (
-                not existing.get("interpretation")
-                or len(rec["interpretation"]) > len(existing["interpretation"] or "")
-            ):
-                existing["interpretation"] = rec["interpretation"]
+                mapping[k]["interpretation"] = interp
 
-            mapping[k] = existing
-
-    return mapping, stats
+    return mapping
 
 
 def count_pf_missing(dsd: DatasetDict) -> Dict[str, int]:
@@ -175,11 +234,10 @@ def apply_restore(
     canonical: DatasetDict,
     pf_map: Dict[str, Dict[str, Optional[str]]],
     *,
-    mode: str,
+    mode: str,  # "internal" | "public"
     overwrite: bool,
     restore_pf_poem_in_internal: bool,
 ) -> DatasetDict:
-    # mode: "internal" or "public"
     if mode not in {"internal", "public"}:
         raise ValueError("mode must be 'internal' or 'public'")
 
@@ -197,16 +255,15 @@ def apply_restore(
             k = make_key(authors[i], titles[i], sources[i])
             rec = pf_map.get(k)
 
-            # always restore interpretation if missing (or overwrite)
+            # interpretation: always try to restore
             if rec and rec.get("interpretation"):
                 if overwrite or is_missing_text(interps[i]):
                     interps[i] = rec["interpretation"]
 
+            # poem: public masks; internal optionally restores
             if mode == "public":
-                # mask poem only for public version
                 poems[i] = None
             else:
-                # internal: keep poem if you choose to restore it from stale
                 if restore_pf_poem_in_internal and rec and rec.get("poem"):
                     if overwrite or is_missing_text(poems[i]):
                         poems[i] = rec["poem"]
@@ -229,7 +286,6 @@ def write_parquet_splits(dsd: DatasetDict, out_dir: Path) -> None:
         if split not in dsd:
             continue
         path = out_data / f"{split}-00000-of-00001.parquet"
-        # datasets supports to_parquet in recent versions
         dsd[split].to_parquet(str(path))
 
 
@@ -246,15 +302,24 @@ def main() -> None:
     ap.add_argument("--out_public_dir", default="public_masked")
 
     ap.add_argument("--overwrite", action="store_true")
+    ap.add_argument("--restore_pf_poem_in_internal", action="store_true")
+
     ap.add_argument(
-        "--restore_pf_poem_in_internal",
-        action="store_true",
-        help="also restore PF poem text for internal_full",
+        "--stale_revision", default=None, help="optional: pin a known good revision sha"
     )
     ap.add_argument(
-        "--save_to_disk",
+        "--auto_find_revision",
         action="store_true",
-        help="also save arrow format via save_to_disk()",
+        help="auto-search stale history for PF interpretation",
+    )
+    ap.add_argument(
+        "--prefer_poem",
+        action="store_true",
+        help="when auto-finding, require PF poem to exist too",
+    )
+    ap.add_argument("--max_commits", type=int, default=50)
+    ap.add_argument(
+        "--probe_split", default="validation", choices=["train", "validation", "test"]
     )
 
     args = ap.parse_args()
@@ -264,17 +329,32 @@ def main() -> None:
     print(f"loading canonical: {args.repo_canonical}")
     canonical = load_dataset_with_fallback(args.repo_canonical)
 
-    print(f"loading stale: {args.repo_stale}")
-    stale = load_dataset_with_fallback(args.repo_stale)
+    print("canonical PF status before:", count_pf_missing(canonical))
 
-    before = count_pf_missing(canonical)
-    print("canonical pf status before:", before)
+    stale_rev = args.stale_revision
+    if not stale_rev and args.auto_find_revision:
+        print(
+            f"auto-finding a stale revision in {args.repo_stale} (max_commits={args.max_commits}, probe_split={args.probe_split})"
+        )
+        stale_rev = find_best_stale_revision(
+            args.repo_stale,
+            prefer_poem=args.prefer_poem,
+            max_commits=args.max_commits,
+            probe_split=args.probe_split,
+        )
 
-    pf_map, pf_stats = build_pf_map(stale)
-    print("stale pf map stats:", pf_stats)
+    if stale_rev:
+        print(f"loading stale (revision={stale_rev}): {args.repo_stale}")
+    else:
+        print(f"loading stale (HEAD): {args.repo_stale}")
+
+    stale = load_dataset_with_fallback(args.repo_stale, revision=stale_rev)
+
+    print("stale PF status (source):", count_pf_missing(stale))
+
+    pf_map = build_pf_map(stale)
     print("pf map keys:", len(pf_map))
 
-    # internal version: restore interpretations; optionally restore PF poem text
     internal = apply_restore(
         canonical,
         pf_map,
@@ -282,8 +362,6 @@ def main() -> None:
         overwrite=args.overwrite,
         restore_pf_poem_in_internal=args.restore_pf_poem_in_internal,
     )
-
-    # public version: restore interpretations; mask PF poem text only
     public = apply_restore(
         canonical,
         pf_map,
@@ -292,20 +370,9 @@ def main() -> None:
         restore_pf_poem_in_internal=False,
     )
 
-    after_internal = count_pf_missing(internal)
-    after_public = count_pf_missing(public)
+    print("internal PF status after:", count_pf_missing(internal))
+    print("public PF status after  :", count_pf_missing(public))
 
-    print("internal pf status after:", after_internal)
-    print("public pf status after  :", after_public)
-
-    # public sanity: PF poem should be fully masked
-    if (
-        after_public["pf_total"] > 0
-        and after_public["pf_poem_missing"] != after_public["pf_total"]
-    ):
-        print("warning: public_masked does not fully mask PF poem text (unexpected)")
-
-    # write outputs
     out_internal = Path(args.out_internal_dir)
     out_public = Path(args.out_public_dir)
     out_internal.mkdir(parents=True, exist_ok=True)
@@ -314,19 +381,8 @@ def main() -> None:
     write_parquet_splits(internal, out_internal)
     write_parquet_splits(public, out_public)
 
-    if args.save_to_disk:
-        internal.save_to_disk(str(out_internal / "arrow"))
-        public.save_to_disk(str(out_public / "arrow"))
-
     print("wrote internal parquet to:", (out_internal / "data").as_posix())
     print("wrote public parquet to  :", (out_public / "data").as_posix())
-    if args.save_to_disk:
-        print(
-            "also wrote arrow dirs to :",
-            (out_internal / "arrow").as_posix(),
-            "and",
-            (out_public / "arrow").as_posix(),
-        )
 
 
 if __name__ == "__main__":
