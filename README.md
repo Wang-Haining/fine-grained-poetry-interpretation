@@ -90,7 +90,7 @@ pf_train = train.filter(lambda r: r["source"] == "poetry_foundation")
 
 ## Citation
 
-If you use this dataset, please cite the associated paper (to be added). A BibTeX entry will be provided here.
+TBD
 
 ## License
 
